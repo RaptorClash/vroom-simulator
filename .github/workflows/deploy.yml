@@ -1,0 +1,54 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main # Falls dein Hauptbranch 'master' heißt, ändere dies zu 'master'
+
+# Erlaubt dem Skript, auf GitHub Pages zu schreiben
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Verhindert, dass mehrere Deployments gleichzeitig laufen
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        # Nutze 'npm ci', wenn du eine package-lock.json hast, sonst 'npm install'
+        run: npm install
+
+      - name: Build Project
+        run: npm run build
+
+      - name: Upload Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          # Vite speichert die generierten HTML/CSS/JS Dateien standardmäßig im 'dist' Ordner
+          path: './dist'
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
