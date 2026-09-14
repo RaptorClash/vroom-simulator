@@ -1,9 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 
-interface DeviceOrientationEventiOS extends DeviceOrientationEvent {
-    requestPermission?: () => Promise<'granted' | 'denied' | 'default'>;
-}
-
 export function useMotionSensor() {
     const [hasPermission, setHasPermission] = useState(false);
     const [isPaused, setIsPaused] = useState(false);
@@ -12,11 +8,13 @@ export function useMotionSensor() {
     const baselineRef = useRef<number | null>(null);
 
     const requestAccess = async () => {
-        const requestPermission = (DeviceOrientationEvent as unknown as DeviceOrientationEventiOS).requestPermission;
+        const DeviceOrientation = window.DeviceOrientationEvent as unknown as {
+            requestPermission?: () => Promise<'granted' | 'denied' | 'default'>;
+        };
 
-        if (typeof requestPermission === 'function') {
+        if (typeof DeviceOrientation.requestPermission === 'function') {
             try {
-                const permission = await requestPermission();
+                const permission = await DeviceOrientation.requestPermission();
                 if (permission === 'granted') {
                     setHasPermission(true);
                 } else {

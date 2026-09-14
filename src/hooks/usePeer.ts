@@ -19,18 +19,26 @@ export function usePeer(onStateReceived: (state: SyncState) => void) {
     const peerRef = useRef<Peer | null>(null);
     const connRef = useRef<DataConnection | null>(null);
 
+    const callbackRef = useRef(onStateReceived);
+    useEffect(() => {
+        callbackRef.current = onStateReceived;
+    }, [onStateReceived]);
+
+    const setupConnection = (conn: DataConnection) => {
+        connRef.current = conn;
+        conn.on('open', () => setConnected(true));
+        conn.on('data', (data) => callbackRef.current(data as SyncState));
+        conn.on('close', () => setConnected(false));
+    };
+
     const hostServer = () => {
         const id = Math.floor(1000 + Math.random() * 9000).toString();
         const peer = new Peer(`vroom-${id}`);
 
         peer.on('open', (id) => setPeerId(id.replace('vroom-', '')));
-
         peer.on('connection', (conn) => {
-            connRef.current = conn;
             setConnected(true);
-
-            conn.on('data', (data) => onStateReceived(data as SyncState));
-            conn.on('close', () => setConnected(false));
+            setupConnection(conn);
         });
 
         peerRef.current = peer;
@@ -40,15 +48,8 @@ export function usePeer(onStateReceived: (state: SyncState) => void) {
         const peer = new Peer();
         peer.on('open', () => {
             const conn = peer.connect(`vroom-${id}`);
-            connRef.current = conn;
-
-            conn.on('open', () => {
-                setConnected(true);
-                setPeerId(id);
-            });
-
-            conn.on('data', (data) => onStateReceived(data as SyncState));
-            conn.on('close', () => setConnected(false));
+            setupConnection(conn);
+            setPeerId(id);
         });
         peerRef.current = peer;
     };

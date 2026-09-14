@@ -39,24 +39,65 @@ export default function App() {
 
   const [joinCode, setJoinCode] = useState('');
 
+  const [isRestarting, setIsRestarting] = useState(false);
+
   const sensor = useMotionSensor();
 
   const { engineStarted, speed, targetLoad, setTargetLoad, startEngine, stopEngine } = useEngine(
     packId, (masterVol / 100) * engineVol, maxSpd, gears, shiftPt, mode === 'gps' ? 'gps' : 'manual', gpsSpeed
   );
 
+  const restartEngineSmoothly = () => {
+    if (engineStarted) {
+      stopEngine();
+      setIsRestarting(true);
+    }
+  };
+
+  useEffect(() => {
+    if (isRestarting) {
+      const timer = setTimeout(() => {
+        startEngine();
+        setIsRestarting(false);
+      }, 400);
+      return () => clearTimeout(timer);
+    }
+  }, [isRestarting, packId, startEngine]);
+
   const handleIncomingSync = (state: SyncState) => {
     if (state.targetLoad !== undefined) setTargetLoad(state.targetLoad);
-    if (state.packId !== undefined && state.packId !== packId) { setPackId(state.packId); window.location.reload(); }
     if (state.masterVol !== undefined) setMasterVol(state.masterVol);
     if (state.engineVol !== undefined) setEngineVol(state.engineVol);
     if (state.spotifyVol !== undefined) setSpotVol(state.spotifyVol);
     if (state.maxSpeed !== undefined) setMaxSpd(state.maxSpeed);
     if (state.gears !== undefined) setGears(state.gears);
     if (state.shiftPoint !== undefined) setShiftPt(state.shiftPoint);
+
+    if (state.packId !== undefined && state.packId !== packId) {
+      setPackId(state.packId);
+      restartEngineSmoothly();
+    }
   };
 
   const peer = usePeer(handleIncomingSync);
+
+  useEffect(() => {
+    localStorage.setItem('vr_pack', packId);
+    localStorage.setItem('vr_mvol', masterVol.toString());
+    localStorage.setItem('vr_evol', engineVol.toString());
+    localStorage.setItem('vr_svol', spotVol.toString());
+    localStorage.setItem('vr_spd', maxSpd.toString());
+    localStorage.setItem('vr_grs', gears.toString());
+    localStorage.setItem('vr_shft', shiftPt.toString());
+
+    peer.broadcastState({ packId, masterVol, engineVol, spotifyVol: spotVol, maxSpeed: maxSpd, gears, shiftPoint: shiftPt });
+  }, [packId, masterVol, engineVol, spotVol, maxSpd, gears, shiftPt, peer]);
+
+  useEffect(() => {
+    if (mode === 'sensor' && peer.connected) {
+      peer.broadcastState({ targetLoad: sensor.load });
+    }
+  }, [sensor.load, mode, peer]);
 
   useEffect(() => {
     if (mode !== 'gps' || !engineStarted) {
@@ -111,23 +152,27 @@ export default function App() {
   }, [mode, engineStarted, setTargetLoad]);
 
 
-  useEffect(() => {
-    localStorage.setItem('vr_pack', packId); localStorage.setItem('vr_mvol', masterVol.toString());
-    localStorage.setItem('vr_evol', engineVol.toString()); localStorage.setItem('vr_svol', spotVol.toString());
-    localStorage.setItem('vr_spd', maxSpd.toString()); localStorage.setItem('vr_grs', gears.toString());
-    localStorage.setItem('vr_shft', shiftPt.toString());
-
-    peer.broadcastState({ packId, masterVol, engineVol, spotifyVol: spotVol, maxSpeed: maxSpd, gears, shiftPoint: shiftPt });
-  }, [packId, masterVol, engineVol, spotVol, maxSpd, gears, shiftPt, peer]);
-
-  useEffect(() => {
-    if (mode === 'sensor' && peer.connected) {
-      peer.broadcastState({ targetLoad: sensor.load });
-    }
-  }, [sensor.load, mode, peer]);
-
   const handleStart = async () => { setHasInteracted(true); await startEngine(); };
   const handleStop = () => { stopEngine(); setHasInteracted(false); setSettingsOpen(false); };
+
+  const handlePackChange = (id: string) => {
+    setPackId(id);
+    const pack = soundPacks.find(p => p.id === id);
+    let newGears = gears;
+    let newShiftPt = shiftPt;
+
+    if (pack) {
+      newGears = pack.config?.gears || 6;
+      newShiftPt = pack.config?.shiftPoint || 1.0;
+      setGears(newGears);
+      setShiftPt(newShiftPt);
+    }
+
+    peer.broadcastState({ packId: id, gears: newGears, shiftPoint: newShiftPt });
+    restartEngineSmoothly();
+  };
+
+  const displaySpeed = mode === 'gps' ? gpsSpeed : speed;
 
   return (
     <ThemeProvider theme={darkTheme}>
@@ -189,7 +234,7 @@ export default function App() {
           )}
 
           <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-            <Dashboard speed={mode === 'gps' ? gpsSpeed : speed} onStop={handleStop} />
+            <Dashboard speed={displaySpeed} onStop={handleStop} />
             {mode === 'gps' && gpsError && (
               <Typography color="error" variant="body2" sx={{ mt: 2 }}>{gpsError}</Typography>
             )}
@@ -211,7 +256,7 @@ export default function App() {
           <Drawer anchor="right" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
             <Box sx={{ width: { xs: '100vw', sm: 400 }, p: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
               <Typography variant="h5">Einstellungen</Typography>
-              <PackSelector soundPacks={soundPacks} selectedId={packId} onChange={(id) => { setPackId(id); peer.broadcastState({ packId: id }); window.location.reload(); }} />
+              <PackSelector soundPacks={soundPacks} selectedId={packId} onChange={handlePackChange} />
               <Divider />
               <Box>
                 <Typography variant="overline" color="primary">LAUTSTÄRKE</Typography>

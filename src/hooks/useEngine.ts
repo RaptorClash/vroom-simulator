@@ -107,15 +107,23 @@ export function useEngine(
 
     const stopEngine = () => {
         activeNodesRef.current.forEach(node => {
-            node.sourceNode.stop();
+            try { node.sourceNode.stop(); } catch (e) { console.error(e); }
             node.sourceNode.disconnect();
         });
         activeNodesRef.current = [];
+
         if (synthMainOscRef.current) {
-            synthMainOscRef.current.stop();
+            try { synthMainOscRef.current.stop(); } catch (e) { console.error(e); }
             synthMainOscRef.current.disconnect();
             synthSubOscRef.current?.stop();
         }
+
+        // WICHTIG: AudioContext schließen, um RAM freizugeben!
+        if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
+            audioCtxRef.current.close();
+        }
+        audioCtxRef.current = null;
+
         setEngineStarted(false);
         setSpeed(0);
         speedRef.current = 0;
