@@ -36,7 +36,6 @@ export default function App() {
   const [mode, setMode] = useState<'gps' | 'manual' | 'sensor'>('gps');
   const [gpsSpeed, setGpsSpeed] = useState(0);
   const [gpsError, setGpsError] = useState('');
-
   const [joinCode, setJoinCode] = useState('');
 
   const [isRestarting, setIsRestarting] = useState(false);
@@ -44,7 +43,13 @@ export default function App() {
   const sensor = useMotionSensor();
 
   const { engineStarted, speed, targetLoad, setTargetLoad, startEngine, stopEngine } = useEngine(
-    packId, (masterVol / 100) * engineVol, maxSpd, gears, shiftPt, mode === 'gps' ? 'gps' : 'manual', gpsSpeed
+    packId,
+    (masterVol / 100) * engineVol,
+    maxSpd,
+    gears,
+    shiftPt,
+    mode === 'manual' ? 'manual' : 'gps',
+    gpsSpeed
   );
 
   const restartEngineSmoothly = () => {
@@ -82,26 +87,8 @@ export default function App() {
   const peer = usePeer(handleIncomingSync);
 
   useEffect(() => {
-    localStorage.setItem('vr_pack', packId);
-    localStorage.setItem('vr_mvol', masterVol.toString());
-    localStorage.setItem('vr_evol', engineVol.toString());
-    localStorage.setItem('vr_svol', spotVol.toString());
-    localStorage.setItem('vr_spd', maxSpd.toString());
-    localStorage.setItem('vr_grs', gears.toString());
-    localStorage.setItem('vr_shft', shiftPt.toString());
-
-    peer.broadcastState({ packId, masterVol, engineVol, spotifyVol: spotVol, maxSpeed: maxSpd, gears, shiftPoint: shiftPt });
-  }, [packId, masterVol, engineVol, spotVol, maxSpd, gears, shiftPt, peer]);
-
-  useEffect(() => {
-    if (mode === 'sensor' && peer.connected) {
-      peer.broadcastState({ targetLoad: sensor.load });
-    }
-  }, [sensor.load, mode, peer]);
-
-  useEffect(() => {
-    if (mode !== 'gps' || !engineStarted) {
-      if (mode === 'gps' && engineStarted) setTargetLoad(0);
+    if ((mode !== 'gps' && mode !== 'sensor') || !engineStarted) {
+      if (mode === 'manual' && engineStarted) setTargetLoad(0);
       return;
     }
 
@@ -120,37 +107,52 @@ export default function App() {
 
         setGpsSpeed(currentSpeedKmh);
 
-        const now = Date.now();
-        const dt = (now - lastTime) / 1000;
+        if (mode === 'gps') {
+          const now = Date.now();
+          const dt = (now - lastTime) / 1000;
 
-        if (dt >= 0.5) {
-          const acceleration = (currentSpeedKmh - lastSpeedKmh) / dt;
-          let newLoad: number;
+          if (dt >= 0.5) {
+            const acceleration = (currentSpeedKmh - lastSpeedKmh) / dt;
+            let newLoad: number;
 
-          if (acceleration <= 0.1) {
-            newLoad = 0.0;
-          } else if (acceleration > 2.0) {
-            newLoad = 1.0;
-          } else if (acceleration > 0.5) {
-            newLoad = 0.6;
-          } else {
-            newLoad = 0.25;
+            if (acceleration <= 0.1) newLoad = 0.0;
+            else if (acceleration > 2.0) newLoad = 1.0;
+            else if (acceleration > 0.5) newLoad = 0.6;
+            else newLoad = 0.25;
+
+            setTargetLoad(newLoad);
+            lastSpeedKmh = currentSpeedKmh;
+            lastTime = now;
           }
-
-          setTargetLoad(newLoad);
-          lastSpeedKmh = currentSpeedKmh;
-          lastTime = now;
         }
       },
       () => {
         setGpsError("GPS Signal konnte nicht abgerufen werden.");
-        setTargetLoad(0);
+        if (mode === 'gps') setTargetLoad(0);
       },
       { enableHighAccuracy: true, maximumAge: 1000 }
     );
     return () => navigator.geolocation.clearWatch(watchId);
   }, [mode, engineStarted, setTargetLoad]);
 
+
+  useEffect(() => {
+    localStorage.setItem('vr_pack', packId);
+    localStorage.setItem('vr_mvol', masterVol.toString());
+    localStorage.setItem('vr_evol', engineVol.toString());
+    localStorage.setItem('vr_svol', spotVol.toString());
+    localStorage.setItem('vr_spd', maxSpd.toString());
+    localStorage.setItem('vr_grs', gears.toString());
+    localStorage.setItem('vr_shft', shiftPt.toString());
+
+    peer.broadcastState({ packId, masterVol, engineVol, spotifyVol: spotVol, maxSpeed: maxSpd, gears, shiftPoint: shiftPt });
+  }, [packId, masterVol, engineVol, spotVol, maxSpd, gears, shiftPt, peer]);
+
+  useEffect(() => {
+    if (mode === 'sensor' && peer.connected) {
+      peer.broadcastState({ targetLoad: sensor.load });
+    }
+  }, [sensor.load, mode, peer]);
 
   const handleStart = async () => { setHasInteracted(true); await startEngine(); };
   const handleStop = () => { stopEngine(); setHasInteracted(false); setSettingsOpen(false); };
@@ -172,7 +174,7 @@ export default function App() {
     restartEngineSmoothly();
   };
 
-  const displaySpeed = mode === 'gps' ? gpsSpeed : speed;
+  const displaySpeed = (mode === 'gps' || mode === 'sensor') ? gpsSpeed : speed;
 
   return (
     <ThemeProvider theme={darkTheme}>
@@ -222,7 +224,7 @@ export default function App() {
                     <Button variant="contained" color="secondary" onClick={sensor.requestAccess}>Sensoren freigeben</Button>
                   ) : (
                     <>
-                      <Button variant="outlined" color="warning" onClick={sensor.calibrate} startIcon={<FaArrowsToEye />}>Kalibrieren (Nullpunkt)</Button>
+                      <Button variant="outlined" color="warning" onClick={sensor.calibrate} startIcon={<FaArrowsToEye />}>Kalibrieren</Button>
                       <Button variant="contained" color={sensor.isPaused ? "success" : "error"} onClick={sensor.togglePause} startIcon={sensor.isPaused ? <FaPlay /> : <FaPause />}>
                         {sensor.isPaused ? "Fortsetzen" : "Pausieren"}
                       </Button>
@@ -235,7 +237,7 @@ export default function App() {
 
           <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
             <Dashboard speed={displaySpeed} onStop={handleStop} />
-            {mode === 'gps' && gpsError && (
+            {(mode === 'gps' || mode === 'sensor') && gpsError && (
               <Typography color="error" variant="body2" sx={{ mt: 2 }}>{gpsError}</Typography>
             )}
           </Box>
