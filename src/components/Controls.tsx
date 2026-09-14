@@ -1,4 +1,5 @@
 import { Stack, Button } from '@mui/material';
+import { useEffect } from 'react';
 import { FaPause, FaForward, FaGaugeHigh, FaBackward } from 'react-icons/fa6';
 
 interface ControlsProps {
@@ -7,6 +8,13 @@ interface ControlsProps {
 }
 
 export function Controls({ targetLoad, setTargetLoad }: ControlsProps) {
+
+  useEffect(() => {
+    return () => {
+      setTargetLoad(0);
+    };
+  }, [setTargetLoad]);
+
   return (
     <Stack direction="row" sx={{ flexWrap: 'wrap' }} spacing={2}>
       <Button

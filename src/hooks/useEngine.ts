@@ -8,7 +8,9 @@ export function useEngine(
     globalVolume: number,
     maxSpeed: number,
     uiGears: number,
-    uiShiftPoint: number
+    uiShiftPoint: number,
+    mode: 'gps' | 'manual' = 'manual',
+    gpsSpeed: number = 0
 ) {
     const [engineStarted, setEngineStarted] = useState(false);
     const [speed, setSpeed] = useState(0);
@@ -173,16 +175,24 @@ export function useEngine(
             if (!ctx || !activePack) return;
 
             currentLoadRef.current += (targetLoad - currentLoadRef.current) * 0.15;
-            const acceleration = currentLoadRef.current > 0
-                ? currentLoadRef.current * 3.5
-                : currentLoadRef.current < 0
-                    ? currentLoadRef.current * 5.0
-                    : -0.5;
-
             const prevLoad = currentLoadRef.current;
-            let newSpeed = speedRef.current + acceleration;
-            if (newSpeed < 0) newSpeed = 0;
-            if (newSpeed > maxSpeed) newSpeed = maxSpeed;
+
+            let newSpeed: number;
+
+            if (mode === 'gps') {
+                newSpeed = gpsSpeed;
+            } else {
+                const acceleration = currentLoadRef.current > 0
+                    ? currentLoadRef.current * 3.5
+                    : currentLoadRef.current < 0
+                        ? currentLoadRef.current * 5.0
+                        : -0.5;
+
+                newSpeed = speedRef.current + acceleration;
+                if (newSpeed < 0) newSpeed = 0;
+                if (newSpeed > maxSpeed) newSpeed = maxSpeed;
+            }
+
             speedRef.current = newSpeed;
             setSpeed(newSpeed);
 
@@ -282,7 +292,6 @@ export function useEngine(
         }, 50);
 
         return () => clearInterval(interval);
-    }, [engineStarted, targetLoad, maxSpeed, uiGears, uiShiftPoint, selectedPackId]);
-
+    }, [engineStarted, targetLoad, maxSpeed, uiGears, uiShiftPoint, selectedPackId, mode, gpsSpeed]);
     return { engineStarted, speed, targetLoad, setTargetLoad, startEngine, stopEngine };
 }
