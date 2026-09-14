@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Paper, Typography, Button, Box, CircularProgress, Alert, TextField, Avatar, IconButton } from '@mui/material';
+import { Typography, Button, Box, CircularProgress, Alert, TextField, Avatar, IconButton } from '@mui/material';
 import { FaSpotify, FaPlay, FaPause, FaForward, FaBackward } from 'react-icons/fa6';
 
 interface Playlist {
@@ -21,14 +21,20 @@ interface SpotifyState {
     track_window: { current_track: SpotifyTrack };
 }
 
+interface WebPlaybackReadyParams {
+    device_id: string;
+}
+
 interface SpotifyPlayer {
     connect: () => Promise<boolean>;
     disconnect: () => void;
-    addListener: (eventName: string, cb: (data: unknown) => void) => void;
+    addListener(eventName: 'ready' | 'not_ready', cb: (data: WebPlaybackReadyParams) => void): void;
+    addListener(eventName: 'player_state_changed', cb: (state: SpotifyState | null) => void): void;
     getCurrentState: () => Promise<SpotifyState | null>;
     previousTrack: () => Promise<void>;
     nextTrack: () => Promise<void>;
     togglePlay: () => Promise<void>;
+    setVolume: (volume: number) => Promise<void>;
 }
 
 declare global {
@@ -59,10 +65,15 @@ const base64encode = (input: ArrayBuffer) => {
         .replace(/\//g, '_');
 };
 
-export function SpotifyPanel() {
+interface SpotifyPanelProps {
+    volume: number;
+}
+
+export function SpotifyPanel({ volume }: SpotifyPanelProps) {
     const [clientId, setClientId] = useState<string>(() => window.localStorage.getItem("spotify_client_id") || "");
     const [inputClientId, setInputClientId] = useState<string>("");
     const [token, setToken] = useState<string | null>(() => window.localStorage.getItem("spotify_token"));
+
     const [playlists, setPlaylists] = useState<Playlist[]>([]);
     const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
     const [loading, setLoading] = useState<boolean>(false);
@@ -72,6 +83,8 @@ export function SpotifyPanel() {
     const [deviceId, setDeviceId] = useState<string | null>(null);
     const [currentTrack, setCurrentTrack] = useState<SpotifyTrack | null>(null);
     const [isPaused, setPaused] = useState<boolean>(true);
+
+    const hasFetchedToken = useRef<boolean>(false);
 
     const logout = useCallback(() => {
         setToken(null);
@@ -85,6 +98,7 @@ export function SpotifyPanel() {
         setCurrentTrack(null);
         window.localStorage.removeItem("spotify_token");
         window.localStorage.removeItem("code_verifier");
+        window.history.replaceState({}, document.title, window.location.pathname);
     }, []);
 
     const fetchPlaylists = useCallback(async (authToken: string) => {
@@ -114,7 +128,10 @@ export function SpotifyPanel() {
         const urlParams = new URLSearchParams(window.location.search);
         const code = urlParams.get('code');
 
-        if (code && clientId && !window.localStorage.getItem("spotify_token")) {
+        if (code && clientId && !token && !hasFetchedToken.current) {
+            hasFetchedToken.current = true;
+            window.history.replaceState({}, document.title, window.location.pathname);
+
             const exchangeCodeForToken = async () => {
                 setLoading(true);
                 const codeVerifier = window.localStorage.getItem("code_verifier");
@@ -134,10 +151,10 @@ export function SpotifyPanel() {
                     });
 
                     const data = await response.json();
+
                     if (data.access_token) {
                         window.localStorage.setItem("spotify_token", data.access_token);
                         setToken(data.access_token);
-                        window.history.replaceState({}, document.title, window.location.pathname);
                     } else {
                         setError("Authentifizierungsfehler: " + (data.error_description || data.error));
                     }
@@ -148,17 +165,13 @@ export function SpotifyPanel() {
                 }
             };
 
-            setTimeout(() => {
-                exchangeCodeForToken();
-            }, 0);
+            exchangeCodeForToken();
         }
-    }, [clientId]);
+    }, [clientId, token]);
 
     useEffect(() => {
         if (token) {
-            setTimeout(() => {
-                fetchPlaylists(token);
-            }, 0);
+            setTimeout(() => { fetchPlaylists(token); }, 0);
         }
     }, [token, fetchPlaylists]);
 
@@ -169,30 +182,26 @@ export function SpotifyPanel() {
             const spotifyPlayer = new window.Spotify.Player({
                 name: 'Vroom Simulator Web Player',
                 getOAuthToken: (cb) => { cb(token); },
-                volume: 0.5
+                volume: volume
             });
 
             playerRef.current = spotifyPlayer;
 
-            spotifyPlayer.addListener('ready', (e: unknown) => {
-                const { device_id } = e as { device_id: string };
-                console.log('Player Ready with Device ID', device_id);
-                setDeviceId(device_id);
+            spotifyPlayer.addListener('ready', (data: WebPlaybackReadyParams) => {
+                console.log('Player Ready with Device ID', data.device_id);
+                setDeviceId(data.device_id);
+                setError(null);
             });
 
-            spotifyPlayer.addListener('not_ready', (e: unknown) => {
-                const { device_id } = e as { device_id: string };
-                console.log('Device ID has gone offline', device_id);
+            spotifyPlayer.addListener('not_ready', (data: WebPlaybackReadyParams) => {
+                console.log('Device ID has gone offline', data.device_id);
                 setDeviceId(null);
             });
 
-            spotifyPlayer.addListener('player_state_changed', (state: unknown) => {
-                const playerState = state as SpotifyState | null;
-                if (!playerState) {
-                    return;
-                }
-                setCurrentTrack(playerState.track_window.current_track);
-                setPaused(playerState.paused);
+            spotifyPlayer.addListener('player_state_changed', (state: SpotifyState | null) => {
+                if (!state) return;
+                setCurrentTrack(state.track_window.current_track);
+                setPaused(state.paused);
             });
 
             spotifyPlayer.connect();
@@ -208,6 +217,12 @@ export function SpotifyPanel() {
             if (playerRef.current) playerRef.current.disconnect();
         };
     }, [token]);
+
+    useEffect(() => {
+        if (playerRef.current) {
+            playerRef.current.setVolume(volume);
+        }
+    }, [volume]);
 
     const handleSaveClientId = () => {
         if (inputClientId.trim()) {
@@ -232,7 +247,7 @@ export function SpotifyPanel() {
         const codeChallenge = base64encode(hashed);
         const REDIRECT_URI = window.location.origin + window.location.pathname;
 
-        const scopes = ["playlist-read-private", "streaming", "user-read-playback-state", "user-modify-playback-state", "user-read-email", "user-read-private"];
+        const scopes = ["playlist-read-private", "playlist-read-collaborative", "streaming", "user-read-playback-state", "user-modify-playback-state", "user-read-email", "user-read-private"];
 
         const authUrl = new URL("https://accounts.spotify.com/authorize");
         authUrl.search = new URLSearchParams({
@@ -250,10 +265,15 @@ export function SpotifyPanel() {
 
     const playPlaylist = async (playlist: Playlist) => {
         setSelectedPlaylist(playlist);
-        if (!deviceId || !token) return;
+        if (!deviceId || !token) {
+            setError("Player ist noch nicht bereit.");
+            return;
+        }
+
+        setError(null);
 
         try {
-            await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
+            const res = await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
                 method: 'PUT',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -261,126 +281,141 @@ export function SpotifyPanel() {
                 },
                 body: JSON.stringify({ context_uri: playlist.uri })
             });
+
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                if (errData.error?.reason === "PREMIUM_REQUIRED") {
+                    setError("Spotify Premium wird für diesen Player benötigt.");
+                } else {
+                    setError(`Wiedergabe-Fehler: ${errData.error?.message || res.status}`);
+                }
+            }
         } catch (e) {
             console.error("Konnte Playlist nicht starten:", e);
+            setError("Netzwerkfehler beim Starten der Wiedergabe.");
         }
     };
 
     return (
-        <Paper elevation={12} sx={{ p: 3, borderRadius: 4, width: '100%', maxWidth: 500, mt: 3, bgcolor: '#121212' }}>
+        <Box sx={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     <FaSpotify size={24} color="#1DB954" />
-                    <Typography variant="h6" sx={{ fontWeight: 'bold', color: '#fff' }}>
-                        Spotify Integration
+                    <Typography variant="subtitle1" sx={{ fontWeight: 'bold', color: '#fff', textTransform: 'uppercase', letterSpacing: 1 }}>
+                        Spotify
                     </Typography>
                 </Box>
                 {clientId && (
-                    <Button size="small" variant="text" onClick={handleResetClientId} sx={{ color: 'text.secondary', fontSize: '0.75rem' }}>
-                        Client ID zurücksetzen
+                    <Button size="small" variant="text" onClick={handleResetClientId} sx={{ color: 'text.secondary', fontSize: '0.70rem' }}>
+                        ID Reset
                     </Button>
                 )}
             </Box>
 
             {!clientId ? (
-                <Box sx={{ textAlign: 'center', py: 2 }}>
-                    <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary', textAlign: 'left' }}>
-                        Trage hier einmalig deine Spotify Client ID ein (wird im Browser gespeichert):
+                <Box sx={{ p: 2, bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 2 }}>
+                    <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>
+                        Trage hier einmalig deine Spotify Client ID ein:
                     </Typography>
                     <TextField
-                        fullWidth size="small" variant="outlined" placeholder="Spotify Client ID eingeben..."
+                        fullWidth size="small" variant="outlined" placeholder="Client ID..."
                         value={inputClientId} onChange={(e) => setInputClientId(e.target.value)}
                         sx={{
                             mb: 2,
                             '& .MuiOutlinedInput-root': { color: '#fff', '& fieldset': { borderColor: '#333' }, '&:hover fieldset': { borderColor: '#1DB954' }, '&.Mui-focused fieldset': { borderColor: '#1DB954' } },
                         }}
                     />
-                    <Button variant="contained" fullWidth onClick={handleSaveClientId} disabled={!inputClientId.trim()} sx={{ bgcolor: '#1DB954', '&:hover': { bgcolor: '#1ed760' }, fontWeight: 'bold', color: '#000', py: 1.2 }}>
-                        Client ID speichern
+                    <Button variant="contained" fullWidth onClick={handleSaveClientId} disabled={!inputClientId.trim()} sx={{ bgcolor: '#1DB954', '&:hover': { bgcolor: '#1ed760' }, color: '#000', fontWeight: 'bold' }}>
+                        Speichern
                     </Button>
                 </Box>
             ) : !token ? (
-                <Box sx={{ textAlign: 'center', py: 2 }}>
+                <Box sx={{ p: 2, bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 2, textAlign: 'center' }}>
                     {loading && <CircularProgress size={24} sx={{ mb: 2 }} />}
-                    {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-                    <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>
-                        Verbinde deinen Spotify-Account, um deine Playlists zu laden.
-                    </Typography>
-                    <Button variant="contained" startIcon={<FaSpotify />} onClick={handleLogin} sx={{ bgcolor: '#1DB954', '&:hover': { bgcolor: '#1ed760' }, fontWeight: 'bold', color: '#000', py: 1.5 }}>
+                    {error && <Alert severity="error" sx={{ mb: 2, fontSize: '0.75rem' }}>{error}</Alert>}
+                    <Button variant="contained" startIcon={<FaSpotify />} onClick={handleLogin} sx={{ bgcolor: '#1DB954', '&:hover': { bgcolor: '#1ed760' }, color: '#000', fontWeight: 'bold' }}>
                         Mit Spotify verbinden
                     </Button>
                 </Box>
             ) : (
                 <Box>
-                    <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
-                        <Button size="small" variant="outlined" color="error" onClick={logout}>
-                            Abmelden
-                        </Button>
-                    </Box>
-
-                    {loading && <CircularProgress size={24} sx={{ display: 'block', mx: 'auto', my: 2 }} />}
-                    {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-
-                    <Box sx={{ mb: 3, p: 2, bgcolor: 'rgba(255,255,255,0.05)', borderRadius: 2, textAlign: 'center' }}>
+                    {/* PLAYER UI */}
+                    <Box sx={{ mb: 2, p: 2, bgcolor: 'rgba(29, 185, 84, 0.1)', borderRadius: 2, border: '1px solid rgba(29, 185, 84, 0.2)' }}>
                         {currentTrack ? (
-                            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
-                                <Avatar src={currentTrack.album.images[0]?.url} variant="rounded" sx={{ width: 80, height: 80, boxShadow: 3 }} />
-                                <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mt: 1, lineHeight: 1.2 }}>{currentTrack.name}</Typography>
-                                <Typography variant="body2" color="text.secondary">{currentTrack.artists.map(a => a.name).join(', ')}</Typography>
-
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 1 }}>
-                                    <IconButton onClick={() => playerRef.current?.previousTrack()} sx={{ color: 'white' }}>
-                                        <FaBackward />
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                                <Avatar src={currentTrack.album?.images?.[0]?.url} variant="rounded" sx={{ width: 56, height: 56 }} />
+                                <Box sx={{ flex: 1, overflow: 'hidden' }}>
+                                    <Typography variant="body2" sx={{ fontWeight: 'bold', color: '#fff', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                                        {currentTrack.name}
+                                    </Typography>
+                                    <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', display: 'block' }}>
+                                        {currentTrack.artists?.map(a => a.name).join(', ') || 'Unbekannter Künstler'}
+                                    </Typography>
+                                </Box>
+                                <Box sx={{ display: 'flex', gap: 0.5 }}>
+                                    <IconButton size="small" onClick={() => playerRef.current?.previousTrack()} sx={{ color: 'white' }}>
+                                        <FaBackward size={14} />
                                     </IconButton>
-                                    <IconButton onClick={() => playerRef.current?.togglePlay()} sx={{ bgcolor: '#1DB954', color: 'black', '&:hover': { bgcolor: '#1ed760' } }}>
-                                        {isPaused ? <FaPlay /> : <FaPause />}
+                                    <IconButton size="small" onClick={() => playerRef.current?.togglePlay()} sx={{ color: '#1DB954' }}>
+                                        {isPaused ? <FaPlay size={18} /> : <FaPause size={18} />}
                                     </IconButton>
-                                    <IconButton onClick={() => playerRef.current?.nextTrack()} sx={{ color: 'white' }}>
-                                        <FaForward />
+                                    <IconButton size="small" onClick={() => playerRef.current?.nextTrack()} sx={{ color: 'white' }}>
+                                        <FaForward size={14} />
                                     </IconButton>
                                 </Box>
                             </Box>
                         ) : (
-                            <Typography variant="body2" color="text.secondary">
-                                {deviceId ? "Player bereit! Wähle eine Playlist oder starte die Wiedergabe auf dem Handy." : "Verbinde Player..."}
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: 'center' }}>
+                                {deviceId ? "Player bereit! Wähle eine Playlist." : "Verbinde Player..."}
                             </Typography>
                         )}
                     </Box>
 
-                    <Typography variant="subtitle2" sx={{ mb: 1, color: 'text.secondary', textAlign: 'left' }}>
-                        Deine Playlists ({playlists.length}):
-                    </Typography>
+                    {error && <Alert severity="error" sx={{ mb: 2, fontSize: '0.75rem', wordBreak: 'break-word' }}>{error}</Alert>}
 
-                    {playlists.length > 0 && (
-                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: 220, overflowY: 'auto', pr: 1 }}>
-                            {playlists.map((playlist) => (
-                                <Box
-                                    key={playlist.id}
-                                    onClick={() => playPlaylist(playlist)}
-                                    sx={{
-                                        p: 1.5, borderRadius: 2, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 2, transition: 'all 0.2s',
-                                        bgcolor: selectedPlaylist?.id === playlist.id ? 'rgba(29, 185, 84, 0.2)' : 'background.default',
-                                        border: selectedPlaylist?.id === playlist.id ? '1px solid #1DB954' : '1px solid transparent',
-                                        '&:hover': { bgcolor: 'rgba(255, 255, 255, 0.05)' }
-                                    }}
-                                >
-                                    {playlist.images?.[0]?.url && (
-                                        <img src={playlist.images[0].url} alt={playlist.name} style={{ width: 40, height: 40, borderRadius: 4, objectFit: 'cover' }} />
-                                    )}
-                                    <Box sx={{ overflow: 'hidden', textAlign: 'left' }}>
-                                        <Typography variant="body2" sx={{ fontWeight: 'bold', color: '#fff', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
-                                            {playlist.name}
-                                        </Typography>
-                                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                                            {playlist.tracks?.total || 0} Titel
-                                        </Typography>
-                                    </Box>
-                                </Box>
-                            ))}
+                    {/* PLAYLIST BEREICH */}
+                    <Box sx={{ bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 2, overflow: 'hidden' }}>
+                        <Box sx={{ display: 'flex', flexDirection: 'column', height: 280 }}>
+                            <Box sx={{ p: 1.5, borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between' }}>
+                                <Typography variant="caption" sx={{ fontWeight: 'bold', color: 'text.secondary' }}>Deine Playlists</Typography>
+                                <Typography variant="caption" sx={{ color: '#1DB954', cursor: 'pointer' }} onClick={logout}>Abmelden</Typography>
+                            </Box>
+                            <Box sx={{ flex: 1, overflowY: 'auto', p: 1, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                                {loading ? (
+                                    <CircularProgress size={20} sx={{ m: 'auto' }} />
+                                ) : (
+                                    playlists.map((playlist) => (
+                                        <Box
+                                            key={playlist.id}
+                                            onClick={() => playPlaylist(playlist)}
+                                            sx={{
+                                                p: 1, borderRadius: 1, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 1.5,
+                                                bgcolor: selectedPlaylist?.id === playlist.id ? 'rgba(29, 185, 84, 0.2)' : 'transparent',
+                                                border: selectedPlaylist?.id === playlist.id ? '1px solid #1DB954' : '1px solid transparent',
+                                                '&:hover': { bgcolor: 'rgba(255, 255, 255, 0.08)' }
+                                            }}
+                                        >
+                                            {playlist.images?.[0]?.url ? (
+                                                <Avatar src={playlist.images[0].url} variant="rounded" sx={{ width: 40, height: 40 }} />
+                                            ) : (
+                                                <Box sx={{ width: 40, height: 40, bgcolor: '#333', borderRadius: 1 }} />
+                                            )}
+                                            <Box sx={{ overflow: 'hidden' }}>
+                                                <Typography variant="body2" sx={{ color: '#fff', fontSize: '0.85rem', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                                                    {playlist.name}
+                                                </Typography>
+                                                <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
+                                                    {playlist.tracks?.total || 0} Titel
+                                                </Typography>
+                                            </Box>
+                                        </Box>
+                                    ))
+                                )}
+                            </Box>
                         </Box>
-                    )}
+                    </Box>
                 </Box>
             )}
-        </Paper>
+        </Box>
     );
 }
