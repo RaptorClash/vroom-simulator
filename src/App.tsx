@@ -43,15 +43,8 @@ export default function App() {
   const sensor = useMotionSensor();
 
   const { engineStarted, speed, targetLoad, setTargetLoad, startEngine, stopEngine } = useEngine(
-    packId,
-    (masterVol / 100) * engineVol,
-    maxSpd,
-    gears,
-    shiftPt,
-    mode === 'manual' ? 'manual' : 'gps',
-    gpsSpeed
+    packId, (masterVol / 100) * engineVol, maxSpd, gears, shiftPt, mode, gpsSpeed
   );
-
   const restartEngineSmoothly = () => {
     if (engineStarted) {
       stopEngine();
