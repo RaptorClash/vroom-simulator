@@ -3,7 +3,10 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches:
-      - master # Passe dies an, falls dein Hauptbranch anders heißt
+      - master
+
+permissions:
+  contents: write
 
 jobs:
   build-and-deploy:
