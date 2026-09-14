@@ -148,6 +148,18 @@ function attachIceDiagnostics(conn: DataConnection) {
             }
         });
 
+        rtc.addEventListener('icecandidateerror', (event) => {
+            const iceError = event as RTCPeerConnectionIceErrorEvent;
+
+            console.error('[Vroom] ICE-Server-Fehler:', {
+                url: iceError.url,
+                errorCode: iceError.errorCode,
+                errorText: iceError.errorText,
+                address: iceError.address,
+                port: iceError.port,
+            });
+        });
+
         console.log('[Vroom] ICE-Diagnose aktiviert');
 
         // Zustand direkt beim Start einmal ausgeben.
