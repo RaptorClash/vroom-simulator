@@ -9,7 +9,7 @@ export function useEngine(
     maxSpeed: number,
     uiGears: number,
     uiShiftPoint: number,
-    mode: 'gps' | 'manual' = 'manual',
+    mode: 'gps' | 'manual' | 'sensor' = 'manual',
     gpsSpeed: number = 0
 ) {
     const [engineStarted, setEngineStarted] = useState(false);
@@ -18,6 +18,9 @@ export function useEngine(
 
     const currentLoadRef = useRef(0);
     const speedRef = useRef(0);
+
+    const engineFreeRevRef = useRef(0);
+
     const audioCtxRef = useRef<AudioContext | null>(null);
     const globalVolumeRef = useRef<GainNode | null>(null);
     const activeNodesRef = useRef<AudioNodeGroup[]>([]);
@@ -118,7 +121,6 @@ export function useEngine(
             synthSubOscRef.current?.stop();
         }
 
-        // WICHTIG: AudioContext schließen, um RAM freizugeben!
         if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
             audioCtxRef.current.close();
         }
@@ -129,6 +131,7 @@ export function useEngine(
         speedRef.current = 0;
         setTargetLoad(0);
         currentLoadRef.current = 0;
+        engineFreeRevRef.current = 0;
     };
 
     const playBlowoffSound = (activePack: SoundPack, ctx: AudioContext) => {
@@ -187,7 +190,7 @@ export function useEngine(
 
             let newSpeed: number;
 
-            if (mode === 'gps') {
+            if (mode === 'gps' || mode === 'sensor') {
                 newSpeed = gpsSpeed;
             } else {
                 const acceleration = currentLoadRef.current > 0
@@ -202,9 +205,29 @@ export function useEngine(
             }
 
             speedRef.current = newSpeed;
-            setSpeed(newSpeed);
+            setSpeed(newSpeed); 
 
-            if (prevLoad > 0.5 && targetLoad <= 0 && newSpeed > 40) {
+            if (newSpeed < 3.0) {
+                if (targetLoad > 0) {
+                    engineFreeRevRef.current += targetLoad * 4.0;
+
+                    const revLimit = (maxSpeed / uiGears) * 0.8;
+                    if (engineFreeRevRef.current > revLimit) {
+                        engineFreeRevRef.current = revLimit;
+                    }
+                } else {
+                    engineFreeRevRef.current *= 0.85;
+                    if (engineFreeRevRef.current < 0.1) engineFreeRevRef.current = 0;
+                }
+            } else {
+                engineFreeRevRef.current *= 0.7;
+                if (engineFreeRevRef.current < 0.1) engineFreeRevRef.current = 0;
+            }
+
+            const virtualEngineSpeed = newSpeed + engineFreeRevRef.current;
+
+
+            if (prevLoad > 0.5 && targetLoad <= 0 && virtualEngineSpeed > 40) {
                 playBlowoffSound(activePack, ctx);
             }
 
@@ -222,13 +245,13 @@ export function useEngine(
 
                 if (uiGears > 1) {
                     const speedPerGear = maxSpeed / uiGears;
-                    const currentGear = Math.min(Math.floor(newSpeed / speedPerGear), uiGears - 1);
-                    const speedInCurrentGear = newSpeed - (currentGear * speedPerGear);
+                    const currentGear = Math.min(Math.floor(virtualEngineSpeed / speedPerGear), uiGears - 1);
+                    const speedInCurrentGear = virtualEngineSpeed - (currentGear * speedPerGear);
                     const gearProgress = speedInCurrentGear / speedPerGear;
                     const startRpm = currentGear === 0 ? idleRPM : effectiveMaxRPM * 0.65;
                     currentRpm = startRpm + gearProgress * (effectiveMaxRPM - startRpm);
                 } else {
-                    currentRpm = idleRPM + (newSpeed / maxSpeed) * (effectiveMaxRPM - idleRPM);
+                    currentRpm = idleRPM + (virtualEngineSpeed / maxSpeed) * (effectiveMaxRPM - idleRPM);
                 }
 
                 const onNodes = nodes.filter(n => n.type === 'on');
@@ -275,7 +298,7 @@ export function useEngine(
             } else if (activePack.type === 'wav-single') {
                 const onNode = activeNodesRef.current.find(n => n.type === 'on');
                 const offNode = activeNodesRef.current.find(n => n.type === 'off');
-                const pitch = 0.6 + (newSpeed / 150);
+                const pitch = 0.6 + (virtualEngineSpeed / 150);
 
                 if (onNode) {
                     onNode.gainNode.gain.setTargetAtTime(onGainFactor * volMultiplier, ctx.currentTime, 0.1);
@@ -286,14 +309,14 @@ export function useEngine(
                     offNode.sourceNode.playbackRate.setTargetAtTime(pitch, ctx.currentTime, 0.1);
                 }
             } else if (activePack.type === 'synth' && synthMainOscRef.current && synthFilterRef.current && activePack.config) {
-                const rpmMultiplier = 1 + (newSpeed / 80);
+                const rpmMultiplier = 1 + (virtualEngineSpeed / 80);
                 const targetFreq = (activePack.config.baseFrequency || 50) * rpmMultiplier;
                 synthMainOscRef.current.frequency.setTargetAtTime(targetFreq, ctx.currentTime, 0.1);
                 if (synthSubOscRef.current) {
                     synthSubOscRef.current.frequency.setTargetAtTime(targetFreq / 2, ctx.currentTime, 0.1);
                 }
                 const loadFilterOffset = onGainFactor > 0 ? 1500 : 0;
-                const speedFilterOffset = newSpeed * 10;
+                const speedFilterOffset = virtualEngineSpeed * 10;
                 const targetFilter = (activePack.config.filterCutoff || 400) + loadFilterOffset + speedFilterOffset;
                 synthFilterRef.current.frequency.setTargetAtTime(targetFilter, ctx.currentTime, 0.1);
             }
@@ -301,5 +324,6 @@ export function useEngine(
 
         return () => clearInterval(interval);
     }, [engineStarted, targetLoad, maxSpeed, uiGears, uiShiftPoint, selectedPackId, mode, gpsSpeed]);
+
     return { engineStarted, speed, targetLoad, setTargetLoad, startEngine, stopEngine };
 }
