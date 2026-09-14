@@ -280,7 +280,7 @@ export default function App() {
                 <TextField
                   size="small"
                   label="Username"
-                  placeholder="v1:..."
+                  placeholder="Username"
                   value={turnUser}
                   onChange={(e) => setTurnUser(e.target.value)}
                 />
@@ -288,7 +288,7 @@ export default function App() {
                   size="small"
                   label="Credential"
                   type="password"
-                  placeholder="LomjGri..."
+                  placeholder="Passwort"
                   value={turnPass}
                   onChange={(e) => setTurnPass(e.target.value)}
                 />

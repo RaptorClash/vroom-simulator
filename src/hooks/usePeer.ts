@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Peer, DataConnection } from 'peerjs';
+import { Peer } from 'peerjs';
+import type { DataConnection } from 'peerjs';
 
 export interface SyncState {
     targetLoad?: number;
@@ -126,7 +127,7 @@ export function usePeer(onIncomingSync: (state: SyncState) => void) {
             });
 
             setPeer(newPeer);
-        } catch  {
+        } catch {
             setError("Fehler bei der Verbindung.");
         }
     }, [onIncomingSync]);
