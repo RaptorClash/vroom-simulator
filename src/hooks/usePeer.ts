@@ -46,6 +46,117 @@ const PEER_CONFIG = {
 
 const CONNECTION_TIMEOUT = 15_000;
 
+/**
+ * Kleine WebRTC-/ICE-Diagnose.
+ *
+ * Zeigt in der Browser-Konsole:
+ * - ICE Gathering State
+ * - ICE Connection State
+ * - RTCPeerConnection State
+ * - gefundene ICE-Kandidaten (host / srflx / relay)
+ * - den erfolgreichen ICE-Pfad inklusive RTT
+ */
+function attachIceDiagnostics(conn: DataConnection) {
+    let attempts = 0;
+
+    const attach = () => {
+        attempts += 1;
+
+        const rtc = (
+            conn as DataConnection & {
+                peerConnection?: RTCPeerConnection;
+            }
+        ).peerConnection;
+
+        // PeerJS erstellt die RTCPeerConnection eventuell erst kurz nach
+        // dem Anlegen der DataConnection.
+        if (!rtc) {
+            if (attempts < 10) {
+                window.setTimeout(attach, 100);
+            } else {
+                console.warn(
+                    '[Vroom] ICE-Diagnose: RTCPeerConnection nicht gefunden'
+                );
+            }
+
+            return;
+        }
+
+        const logState = () => {
+            console.log('[Vroom] ICE:', {
+                gathering: rtc.iceGatheringState,
+                connection: rtc.iceConnectionState,
+                peerConnection: rtc.connectionState,
+            });
+        };
+
+        rtc.addEventListener('icegatheringstatechange', logState);
+        rtc.addEventListener('iceconnectionstatechange', logState);
+        rtc.addEventListener('connectionstatechange', logState);
+
+        rtc.addEventListener('icecandidate', (event) => {
+            if (!event.candidate) {
+                console.log(
+                    '[Vroom] ICE: Kandidatensammlung abgeschlossen'
+                );
+                return;
+            }
+
+            const type =
+                event.candidate.type ||
+                event.candidate.candidate.match(/ typ ([a-z0-9]+)/)?.[1] ||
+                'unknown';
+
+            console.log('[Vroom] ICE-Kandidat:', {
+                type,
+                protocol: event.candidate.protocol,
+                address: event.candidate.address ?? 'versteckt',
+                port: event.candidate.port,
+            });
+        });
+
+        rtc.addEventListener('iceconnectionstatechange', async () => {
+            if (
+                rtc.iceConnectionState !== 'connected' &&
+                rtc.iceConnectionState !== 'completed'
+            ) {
+                return;
+            }
+
+            try {
+                const stats = await rtc.getStats();
+
+                stats.forEach((report) => {
+                    if (
+                        report.type === 'candidate-pair' &&
+                        report.state === 'succeeded' &&
+                        report.nominated
+                    ) {
+                        console.log('[Vroom] ICE-Pfad gewählt:', {
+                            localCandidateId: report.localCandidateId,
+                            remoteCandidateId: report.remoteCandidateId,
+                            currentRoundTripTime:
+                                report.currentRoundTripTime,
+                        });
+                    }
+                });
+            } catch (err) {
+                console.warn(
+                    '[Vroom] ICE-Stats konnten nicht gelesen werden:',
+                    err
+                );
+            }
+        });
+
+        console.log('[Vroom] ICE-Diagnose aktiviert');
+
+        // Zustand direkt beim Start einmal ausgeben.
+        logState();
+    };
+
+    attach();
+}
+
 export function usePeer(
     onStateReceived: (state: SyncState) => void
 ) {
@@ -78,8 +189,8 @@ export function usePeer(
             setConnected(false);
             setStatus('error');
             setError(
-                'Die direkte WebRTC-Verbindung konnte nicht aufgebaut werden. ' +
-                'Das Netzwerk blockiert möglicherweise direkte P2P-Verbindungen.'
+                'Die WebRTC-Verbindung konnte nicht aufgebaut werden. ' +
+                'Direkte P2P-Verbindungen und der TURN-Fallback sind fehlgeschlagen.'
             );
         }, CONNECTION_TIMEOUT);
     }, [clearConnectionTimeout]);
@@ -99,6 +210,9 @@ export function usePeer(
             setStatus('connecting');
             setError(null);
 
+            // ICE-Diagnose aktivieren.
+            attachIceDiagnostics(conn);
+
             startConnectionTimeout();
 
             conn.on('open', () => {
@@ -108,7 +222,9 @@ export function usePeer(
                 setStatus('connected');
                 setError(null);
 
-                console.log('[Vroom] WebRTC DataConnection geöffnet');
+                console.log(
+                    '[Vroom] WebRTC DataConnection geöffnet'
+                );
             });
 
             conn.on('data', (data) => {
@@ -128,7 +244,9 @@ export function usePeer(
                 setConnected(false);
                 setStatus('disconnected');
 
-                console.log('[Vroom] Verbindung geschlossen');
+                console.log(
+                    '[Vroom] Verbindung geschlossen'
+                );
             });
 
             conn.on('error', (err) => {
@@ -142,7 +260,10 @@ export function usePeer(
                         : 'Fehler bei der WebRTC-Verbindung.'
                 );
 
-                console.error('[Vroom] DataConnection-Fehler:', err);
+                console.error(
+                    '[Vroom] DataConnection-Fehler:',
+                    err
+                );
             });
         },
         [clearConnectionTimeout, startConnectionTimeout]
@@ -164,17 +285,29 @@ export function usePeer(
         setError(null);
         setPeerId(null);
 
-        const id = Math.floor(1000 + Math.random() * 9000).toString();
-        const peer = new Peer(`${PEER_PREFIX}${id}`, PEER_CONFIG);
+        const id = Math.floor(
+            1000 + Math.random() * 9000
+        ).toString();
+
+        const peer = new Peer(
+            `${PEER_PREFIX}${id}`,
+            PEER_CONFIG
+        );
 
         peer.on('open', (openedId) => {
-            const cleanId = openedId.replace(PEER_PREFIX, '');
+            const cleanId = openedId.replace(
+                PEER_PREFIX,
+                ''
+            );
 
             setPeerId(cleanId);
             setStatus('idle');
             setError(null);
 
-            console.log('[Vroom] Host gestartet:', openedId);
+            console.log(
+                '[Vroom] Host gestartet:',
+                openedId
+            );
         });
 
         peer.on('connection', (conn) => {
@@ -190,7 +323,9 @@ export function usePeer(
             setConnected(false);
             setStatus('disconnected');
 
-            console.log('[Vroom] Host: PeerServer getrennt');
+            console.log(
+                '[Vroom] Host: PeerServer getrennt'
+            );
         });
 
         peer.on('error', (err) => {
@@ -199,7 +334,8 @@ export function usePeer(
             setConnected(false);
             setStatus('error');
 
-            let message = 'Unbekannter PeerJS-Fehler.';
+            let message =
+                'Unbekannter PeerJS-Fehler.';
 
             switch (err.type) {
                 case 'unavailable-id':
@@ -213,24 +349,33 @@ export function usePeer(
                     break;
 
                 default:
-                    message = err.message || message;
+                    message =
+                        err.message || message;
                     break;
             }
 
             setError(message);
 
-            console.error('[Vroom] Host-Fehler:', err);
+            console.error(
+                '[Vroom] Host-Fehler:',
+                err
+            );
         });
 
         peerRef.current = peer;
-    }, [clearConnectionTimeout, setupConnection]);
+    }, [
+        clearConnectionTimeout,
+        setupConnection,
+    ]);
 
     const connectToServer = useCallback(
         (id: string) => {
             const cleanId = id.trim();
 
             if (!/^\d{4}$/.test(cleanId)) {
-                setError('Der Vroom-Code muss aus 4 Ziffern bestehen.');
+                setError(
+                    'Der Vroom-Code muss aus 4 Ziffern bestehen.'
+                );
                 setStatus('error');
                 return;
             }
@@ -260,7 +405,9 @@ export function usePeer(
             setError(null);
             setPeerId(cleanId);
 
-            const peer = new Peer(PEER_CONFIG);
+            const peer = new Peer(
+                PEER_CONFIG
+            );
 
             peer.on('open', () => {
                 console.log(
@@ -282,7 +429,9 @@ export function usePeer(
                 setConnected(false);
                 setStatus('disconnected');
 
-                console.log('[Vroom] Client: PeerServer getrennt');
+                console.log(
+                    '[Vroom] Client: PeerServer getrennt'
+                );
             });
 
             peer.on('close', () => {
@@ -296,7 +445,8 @@ export function usePeer(
                 setConnected(false);
                 setStatus('error');
 
-                let message = 'Unbekannter PeerJS-Fehler.';
+                let message =
+                    'Unbekannter PeerJS-Fehler.';
 
                 switch (err.type) {
                     case 'peer-unavailable':
@@ -310,36 +460,49 @@ export function usePeer(
                         break;
 
                     default:
-                        message = err.message || message;
+                        message =
+                            err.message || message;
                         break;
                 }
 
                 setError(message);
 
-                console.error('[Vroom] Client-Fehler:', err);
+                console.error(
+                    '[Vroom] Client-Fehler:',
+                    err
+                );
             });
 
             peerRef.current = peer;
         },
-        [clearConnectionTimeout, setupConnection]
+        [
+            clearConnectionTimeout,
+            setupConnection,
+        ]
     );
 
-    const broadcastState = useCallback((state: SyncState) => {
-        const connection = connRef.current;
+    const broadcastState = useCallback(
+        (state: SyncState) => {
+            const connection = connRef.current;
 
-        if (!connection || !connection.open) {
-            return;
-        }
+            if (
+                !connection ||
+                !connection.open
+            ) {
+                return;
+            }
 
-        try {
-            connection.send(state);
-        } catch (err) {
-            console.error(
-                '[Vroom] Fehler beim Senden:',
-                err
-            );
-        }
-    }, []);
+            try {
+                connection.send(state);
+            } catch (err) {
+                console.error(
+                    '[Vroom] Fehler beim Senden:',
+                    err
+                );
+            }
+        },
+        []
+    );
 
     useEffect(() => {
         return () => {
