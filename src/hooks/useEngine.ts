@@ -19,7 +19,7 @@ export function useEngine(
     const currentLoadRef = useRef(0);
     const speedRef = useRef(0);
 
-    const engineFreeRevRef = useRef(0);
+    const rpmRef = useRef(0);
 
     const audioCtxRef = useRef<AudioContext | null>(null);
     const globalVolumeRef = useRef<GainNode | null>(null);
@@ -131,7 +131,7 @@ export function useEngine(
         speedRef.current = 0;
         setTargetLoad(0);
         currentLoadRef.current = 0;
-        engineFreeRevRef.current = 0;
+        rpmRef.current = 0;
     };
 
     const playBlowoffSound = (activePack: SoundPack, ctx: AudioContext) => {
@@ -205,29 +205,56 @@ export function useEngine(
             }
 
             speedRef.current = newSpeed;
-            setSpeed(newSpeed); 
+            setSpeed(newSpeed);
 
-            if (newSpeed < 3.0) {
-                if (targetLoad > 0) {
-                    engineFreeRevRef.current += targetLoad * 4.0;
+            const idleRPM = activePack.config?.idleRPM || 900;
+            let absoluteMaxRPM = activePack.config?.maxRPM;
 
-                    const revLimit = (maxSpeed / uiGears) * 0.8;
-                    if (engineFreeRevRef.current > revLimit) {
-                        engineFreeRevRef.current = revLimit;
-                    }
+            if (!absoluteMaxRPM) {
+                if (activePack.type === 'wav-multi' && activeNodesRef.current.length > 0) {
+                    absoluteMaxRPM = Math.max(...activeNodesRef.current.map(n => n.rpm || 900));
                 } else {
-                    engineFreeRevRef.current *= 0.85;
-                    if (engineFreeRevRef.current < 0.1) engineFreeRevRef.current = 0;
+                    absoluteMaxRPM = 6000;
                 }
-            } else {
-                engineFreeRevRef.current *= 0.7;
-                if (engineFreeRevRef.current < 0.1) engineFreeRevRef.current = 0;
             }
 
-            const virtualEngineSpeed = newSpeed + engineFreeRevRef.current;
+            const effectiveMaxRPM = idleRPM + (absoluteMaxRPM - idleRPM) * uiShiftPoint;
+
+            if (rpmRef.current === 0) rpmRef.current = idleRPM;
+
+            if (newSpeed < 3.0) {
+                if (targetLoad > 0.05) {
+                    rpmRef.current += targetLoad * 250;
+                } else {
+                    rpmRef.current -= 120;
+                }
+            } else {
+                let targetGearRpm: number;
+                if (uiGears > 1) {
+                    const speedPerGear = maxSpeed / uiGears;
+                    const currentGear = Math.min(Math.floor(newSpeed / speedPerGear), uiGears - 1);
+                    const speedInCurrentGear = newSpeed - (currentGear * speedPerGear);
+                    const gearProgress = speedInCurrentGear / speedPerGear;
+                    const startRpm = currentGear === 0 ? idleRPM : effectiveMaxRPM * 0.65;
+                    targetGearRpm = startRpm + gearProgress * (effectiveMaxRPM - startRpm);
+                } else {
+                    targetGearRpm = idleRPM + (newSpeed / maxSpeed) * (effectiveMaxRPM - idleRPM);
+                }
+
+                rpmRef.current += (targetGearRpm - rpmRef.current) * 0.3;
+            }
+
+            if (rpmRef.current < idleRPM) {
+                rpmRef.current = idleRPM;
+            }
+            if (rpmRef.current > effectiveMaxRPM) {
+                rpmRef.current = effectiveMaxRPM - (Math.random() * 300);
+            }
+
+            const currentRpm = rpmRef.current;
 
 
-            if (prevLoad > 0.5 && targetLoad <= 0 && virtualEngineSpeed > 40) {
+            if (prevLoad > 0.5 && targetLoad <= 0 && currentRpm > effectiveMaxRPM * 0.6) {
                 playBlowoffSound(activePack, ctx);
             }
 
@@ -238,22 +265,6 @@ export function useEngine(
 
             if (activePack.type === 'wav-multi') {
                 const nodes = activeNodesRef.current;
-                const idleRPM = activePack.config?.idleRPM || 900;
-                const absoluteMaxRPM = activePack.config?.maxRPM || Math.max(...nodes.map(n => n.rpm || 900));
-                const effectiveMaxRPM = idleRPM + (absoluteMaxRPM - idleRPM) * uiShiftPoint;
-                let currentRpm = idleRPM;
-
-                if (uiGears > 1) {
-                    const speedPerGear = maxSpeed / uiGears;
-                    const currentGear = Math.min(Math.floor(virtualEngineSpeed / speedPerGear), uiGears - 1);
-                    const speedInCurrentGear = virtualEngineSpeed - (currentGear * speedPerGear);
-                    const gearProgress = speedInCurrentGear / speedPerGear;
-                    const startRpm = currentGear === 0 ? idleRPM : effectiveMaxRPM * 0.65;
-                    currentRpm = startRpm + gearProgress * (effectiveMaxRPM - startRpm);
-                } else {
-                    currentRpm = idleRPM + (virtualEngineSpeed / maxSpeed) * (effectiveMaxRPM - idleRPM);
-                }
-
                 const onNodes = nodes.filter(n => n.type === 'on');
                 const offNodes = nodes.filter(n => n.type === 'off');
 
@@ -298,7 +309,7 @@ export function useEngine(
             } else if (activePack.type === 'wav-single') {
                 const onNode = activeNodesRef.current.find(n => n.type === 'on');
                 const offNode = activeNodesRef.current.find(n => n.type === 'off');
-                const pitch = 0.6 + (virtualEngineSpeed / 150);
+                const pitch = 0.6 + ((currentRpm - idleRPM) / (effectiveMaxRPM - idleRPM)) * 1.5;
 
                 if (onNode) {
                     onNode.gainNode.gain.setTargetAtTime(onGainFactor * volMultiplier, ctx.currentTime, 0.1);
@@ -309,14 +320,15 @@ export function useEngine(
                     offNode.sourceNode.playbackRate.setTargetAtTime(pitch, ctx.currentTime, 0.1);
                 }
             } else if (activePack.type === 'synth' && synthMainOscRef.current && synthFilterRef.current && activePack.config) {
-                const rpmMultiplier = 1 + (virtualEngineSpeed / 80);
+                const rpmMultiplier = currentRpm / idleRPM;
                 const targetFreq = (activePack.config.baseFrequency || 50) * rpmMultiplier;
+
                 synthMainOscRef.current.frequency.setTargetAtTime(targetFreq, ctx.currentTime, 0.1);
                 if (synthSubOscRef.current) {
                     synthSubOscRef.current.frequency.setTargetAtTime(targetFreq / 2, ctx.currentTime, 0.1);
                 }
                 const loadFilterOffset = onGainFactor > 0 ? 1500 : 0;
-                const speedFilterOffset = virtualEngineSpeed * 10;
+                const speedFilterOffset = currentRpm > idleRPM ? (currentRpm - idleRPM) / 10 : 0;
                 const targetFilter = (activePack.config.filterCutoff || 400) + loadFilterOffset + speedFilterOffset;
                 synthFilterRef.current.frequency.setTargetAtTime(targetFilter, ctx.currentTime, 0.1);
             }
