@@ -80,6 +80,12 @@ export default function App() {
   const peer = usePeer(handleIncomingSync);
 
   useEffect(() => {
+    if (peer.error) {
+      console.error('[Vroom] Netzwerk:', peer.error);
+    }
+  }, [peer.error]);
+
+  useEffect(() => {
     if ((mode !== 'gps' && mode !== 'sensor') || !engineStarted) {
       if (mode === 'manual' && engineStarted) setTargetLoad(0);
       return;
