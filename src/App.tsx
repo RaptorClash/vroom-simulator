@@ -10,6 +10,7 @@ import { PackSelector } from './components/PackSelector';
 import { Dashboard } from './components/Dashboard';
 import { Controls } from './components/Controls';
 import { SpotifyPanel } from './components/SpotifyPanel';
+import { FaServer } from 'react-icons/fa6';
 
 const darkTheme = createTheme({
   palette: { mode: 'dark', background: { default: '#121212', paper: '#1e1e1e' }, primary: { main: '#f43f5e' } },
@@ -37,8 +38,10 @@ export default function App() {
   const [gpsSpeed, setGpsSpeed] = useState(0);
   const [gpsError, setGpsError] = useState('');
   const [joinCode, setJoinCode] = useState('');
-
   const [isRestarting, setIsRestarting] = useState(false);
+  const [turnUrl, setTurnUrl] = useState(() => getStr('vr_turn_url', ''));
+  const [turnUser, setTurnUser] = useState(() => getStr('vr_turn_user', ''));
+  const [turnPass, setTurnPass] = useState(() => getStr('vr_turn_pass', ''));
 
   const sensor = useMotionSensor();
 
@@ -143,10 +146,11 @@ export default function App() {
     localStorage.setItem('vr_spd', maxSpd.toString());
     localStorage.setItem('vr_grs', gears.toString());
     localStorage.setItem('vr_shft', shiftPt.toString());
-
+    localStorage.setItem('vr_turn_url', turnUrl);
+    localStorage.setItem('vr_turn_user', turnUser);
+    localStorage.setItem('vr_turn_pass', turnPass);
     peer.broadcastState({ packId, masterVol, engineVol, spotifyVol: spotVol, maxSpeed: maxSpd, gears, shiftPoint: shiftPt });
-  }, [packId, masterVol, engineVol, spotVol, maxSpd, gears, shiftPt, peer]);
-
+  }, [packId, masterVol, engineVol, spotVol, maxSpd, gears, shiftPt, turnUrl, turnUser, turnPass, peer]);
   useEffect(() => {
     if (mode === 'sensor' && peer.connected) {
       peer.broadcastState({ targetLoad: sensor.load });
@@ -259,12 +263,37 @@ export default function App() {
               <Typography variant="h5">Einstellungen</Typography>
               <PackSelector soundPacks={soundPacks} selectedId={packId} onChange={handlePackChange} />
               <Divider />
-              <Box>
-                <Typography variant="overline" color="primary">LAUTSTÄRKE</Typography>
-                <Slider value={masterVol} onChange={(_, v) => setMasterVol(v as number)} />
-                <Slider value={engineVol} onChange={(_, v) => setEngineVol(v as number)} />
-                <Slider value={spotVol} onChange={(_, v) => setSpotVol(v as number)} color="success" />
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <Typography variant="overline" color="primary" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <FaServer /> Netzwerk (Relay)
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Wird benötigt für LTE-zu-LTE Verbindungen. (z.B. von rstream.io)
+                </Typography>
+                <TextField
+                  size="small"
+                  label="TURN URLs (kommagetrennt)"
+                  placeholder="turn:aws-eu-west-3-1.c.rstream.io:3478?transport=udp"
+                  value={turnUrl}
+                  onChange={(e) => setTurnUrl(e.target.value)}
+                />
+                <TextField
+                  size="small"
+                  label="Username"
+                  placeholder="v1:..."
+                  value={turnUser}
+                  onChange={(e) => setTurnUser(e.target.value)}
+                />
+                <TextField
+                  size="small"
+                  label="Credential"
+                  type="password"
+                  placeholder="LomjGri..."
+                  value={turnPass}
+                  onChange={(e) => setTurnPass(e.target.value)}
+                />
               </Box>
+
               <Divider />
               <Box>
                 <Typography variant="overline" color="primary">FAHRZEUG</Typography>
