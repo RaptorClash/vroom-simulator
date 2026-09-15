@@ -11,6 +11,13 @@ export interface SyncState {
     gears?: number;
     shiftPoint?: number;
     packId?: string;
+    syncedSpeed?: number;
+    isPaused?: boolean;
+    engineStarted?: boolean;
+    turnUrl?: string;
+    turnUser?: string;
+    turnPass?: string;
+    spotifyClientId?: string;
 }
 
 export function usePeer(onIncomingSync: (state: SyncState) => void) {
@@ -20,19 +27,16 @@ export function usePeer(onIncomingSync: (state: SyncState) => void) {
     const [error, setError] = useState<string | null>(null);
     const [connection, setConnection] = useState<DataConnection | null>(null);
 
-    // Helper-Funktion, um die ICE-Konfiguration zu bauen
     const getIceServers = (): RTCIceServer[] => {
         const iceServers: RTCIceServer[] = [
-            { urls: 'stun:stun.l.google.com:19302' } // Standard Google STUN
+            { urls: 'stun:stun.l.google.com:19302' }
         ];
 
         const turnUrl = localStorage.getItem('vr_turn_url');
         const turnUser = localStorage.getItem('vr_turn_user');
         const turnPass = localStorage.getItem('vr_turn_pass');
 
-        // Nur wenn alle drei Felder befüllt sind, fügen wir den TURN Server hinzu
         if (turnUrl && turnUser && turnPass) {
-            // Wenn der Nutzer mehrere URLs per Komma getrennt eingibt, splitten wir sie
             const urls = turnUrl.includes(',') ? turnUrl.split(',').map(u => u.trim()) : [turnUrl.trim()];
 
             iceServers.push({
@@ -52,7 +56,6 @@ export function usePeer(onIncomingSync: (state: SyncState) => void) {
         try {
             const id = 'vroom-' + Math.floor(1000 + Math.random() * 9000).toString();
 
-            // Peer Instanz mit dynamischer ICE-Konfiguration erstellen
             const newPeer = new Peer(id, {
                 config: {
                     iceServers: getIceServers()
@@ -100,7 +103,6 @@ export function usePeer(onIncomingSync: (state: SyncState) => void) {
         try {
             const fullId = 'vroom-' + pin;
 
-            // Auch beim Client die dynamische Konfiguration nutzen
             const newPeer = new Peer({
                 config: {
                     iceServers: getIceServers()

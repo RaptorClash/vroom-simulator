@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ThemeProvider, createTheme, CssBaseline, Box, Typography, ToggleButtonGroup, ToggleButton, LinearProgress, IconButton, Button, TextField, Stack, Paper, Divider } from '@mui/material';
 import { FaPowerOff, FaGear, FaLink, FaMobileScreen, FaCar, FaPause, FaPlay, FaArrowsToEye } from 'react-icons/fa6';
 import { QRCodeSVG } from 'qrcode.react';
@@ -23,6 +23,8 @@ export default function App() {
   const [hasInteracted, setHasInteracted] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
+  const [isClientRole, setIsClientRole] = useState(false);
+
   const [driverSide, setDriverSide] = useState<'left' | 'right'>(() => getStr('vr_side', 'right') as 'left' | 'right');
 
   const [packId, setPackId] = useState(() => getStr('vr_pack', soundPacks[0]?.id || ''));
@@ -38,6 +40,8 @@ export default function App() {
   const [gpsError, setGpsError] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [isRestarting, setIsRestarting] = useState(false);
+
+  const [syncedSpeed, setSyncedSpeed] = useState<number | null>(null);
 
   const [turnUrl, setTurnUrl] = useState(() => {
     try {
@@ -63,9 +67,12 @@ export default function App() {
     return getStr('vr_turn_pass', '');
   });
 
+  const [spotifyClientId, setSpotifyClientId] = useState(() => getStr('spotify_client_id', ''));
+
   const sensor = useMotionSensor();
+
   const { engineStarted, speed, targetLoad, setTargetLoad, startEngine, stopEngine } = useEngine(
-    packId, (masterVol / 100) * engineVol, maxSpd, gears, shiftPt, mode === 'solo' ? 'sensor' : mode, gpsSpeed
+    packId, isClientRole ? 0 : (masterVol / 100) * engineVol, maxSpd, gears, shiftPt, mode === 'solo' ? 'sensor' : mode, gpsSpeed
   );
 
   const restartEngineSmoothly = () => {
@@ -87,6 +94,24 @@ export default function App() {
     if (state.maxSpeed !== undefined) setMaxSpd(state.maxSpeed);
     if (state.gears !== undefined) setGears(state.gears);
     if (state.shiftPoint !== undefined) setShiftPt(state.shiftPoint);
+
+    if (state.turnUrl !== undefined) setTurnUrl(state.turnUrl);
+    if (state.turnUser !== undefined) setTurnUser(state.turnUser);
+    if (state.turnPass !== undefined) setTurnPass(state.turnPass);
+    if (state.spotifyClientId !== undefined) setSpotifyClientId(state.spotifyClientId);
+
+    if (state.engineStarted !== undefined && state.engineStarted !== engineStarted) {
+      if (state.engineStarted) startEngine(); else stopEngine();
+    }
+
+    if (state.isPaused !== undefined && state.isPaused !== sensor.isPaused) {
+      sensor.togglePause();
+    }
+
+    if (state.syncedSpeed !== undefined) {
+      setSyncedSpeed(state.syncedSpeed);
+    }
+
     if (state.packId !== undefined && state.packId !== packId) {
       setPackId(state.packId);
       restartEngineSmoothly();
@@ -94,6 +119,36 @@ export default function App() {
   };
 
   const peer = usePeer(handleIncomingSync);
+
+  useEffect(() => {
+    localStorage.setItem('vr_pack', packId);
+    localStorage.setItem('vr_mvol', masterVol.toString());
+    localStorage.setItem('vr_evol', engineVol.toString());
+    localStorage.setItem('vr_svol', spotVol.toString());
+    localStorage.setItem('vr_spd', maxSpd.toString());
+    localStorage.setItem('vr_grs', gears.toString());
+    localStorage.setItem('vr_shft', shiftPt.toString());
+    localStorage.setItem('vr_turn_url', turnUrl);
+    localStorage.setItem('vr_turn_user', turnUser);
+    localStorage.setItem('vr_turn_pass', turnPass);
+    localStorage.setItem('vr_side', driverSide);
+    if (spotifyClientId) localStorage.setItem('spotify_client_id', spotifyClientId);
+
+    if (peer.connected) {
+      peer.broadcastState({
+        packId, masterVol, engineVol, spotifyVol: spotVol, maxSpeed: maxSpd,
+        gears, shiftPoint: shiftPt, turnUrl, turnUser, turnPass, spotifyClientId
+      });
+    }
+  }, [packId, masterVol, engineVol, spotVol, maxSpd, gears, shiftPt, turnUrl, turnUser, turnPass, spotifyClientId, driverSide, peer]);
+
+  useEffect(() => {
+    if (peer.connected) {
+      if (mode === 'sensor') peer.broadcastState({ targetLoad: sensor.load, isPaused: sensor.isPaused });
+    }
+    if (mode === 'solo' && engineStarted) setTargetLoad(sensor.load);
+  }, [sensor.load, sensor.isPaused, mode, peer, engineStarted, setTargetLoad]);
+
 
   useEffect(() => {
     if ((mode !== 'gps' && mode !== 'sensor' && mode !== 'solo') || !engineStarted) {
@@ -126,26 +181,23 @@ export default function App() {
     return () => navigator.geolocation.clearWatch(watchId);
   }, [mode, engineStarted, setTargetLoad]);
 
-  useEffect(() => {
-    localStorage.setItem('vr_pack', packId);
-    localStorage.setItem('vr_mvol', masterVol.toString());
-    localStorage.setItem('vr_evol', engineVol.toString());
-    localStorage.setItem('vr_svol', spotVol.toString());
-    localStorage.setItem('vr_spd', maxSpd.toString());
-    localStorage.setItem('vr_grs', gears.toString());
-    localStorage.setItem('vr_shft', shiftPt.toString());
-    localStorage.setItem('vr_turn_url', turnUrl);
-    localStorage.setItem('vr_turn_user', turnUser);
-    localStorage.setItem('vr_turn_pass', turnPass);
-    localStorage.setItem('vr_side', driverSide);
 
-    peer.broadcastState({ packId, masterVol, engineVol, spotifyVol: spotVol, maxSpeed: maxSpd, gears, shiftPoint: shiftPt });
-  }, [packId, masterVol, engineVol, spotVol, maxSpd, gears, shiftPt, turnUrl, turnUser, turnPass, driverSide, peer]);
+  const localDisplaySpeed = (mode === 'gps' || mode === 'sensor' || mode === 'solo') ? gpsSpeed : speed;
+  const speedRef = useRef(localDisplaySpeed);
 
   useEffect(() => {
-    if (mode === 'sensor' && peer.connected) peer.broadcastState({ targetLoad: sensor.load });
-    if (mode === 'solo' && engineStarted) setTargetLoad(sensor.load);
-  }, [sensor.load, mode, peer, engineStarted, setTargetLoad]);
+    speedRef.current = localDisplaySpeed;
+  }, [localDisplaySpeed]);
+
+  useEffect(() => {
+    if (peer.connected && !isClientRole) {
+      const interval = setInterval(() => {
+        peer.broadcastState({ syncedSpeed: speedRef.current });
+      }, 250);
+      return () => clearInterval(interval);
+    }
+  }, [peer.connected, isClientRole, peer]);
+
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -154,9 +206,12 @@ export default function App() {
     if (params.has('turn') || params.has('user') || params.has('pass')) {
       urlChanged = true;
     }
+
     if (params.has('spotId')) {
       try {
-        localStorage.setItem('spotify_client_id', atob(params.get('spotId')!));
+        const decodedSpot = atob(params.get('spotId')!);
+        localStorage.setItem('spotify_client_id', decodedSpot);
+        setTimeout(() => setSpotifyClientId(decodedSpot), 0);
       } catch (e) {
         console.error("Spotify ID Error", e);
       }
@@ -165,13 +220,12 @@ export default function App() {
 
     if (params.has('pin')) {
       const autoPin = params.get('pin')!;
-
       setTimeout(() => {
         setMode('sensor');
         setJoinCode(autoPin);
+        setIsClientRole(true);
         peer.connectToServer(autoPin);
       }, 300);
-
       urlChanged = true;
     }
 
@@ -183,11 +237,13 @@ export default function App() {
   const handleStart = async () => { setHasInteracted(true); await startEngine(); };
 
   const toggleEngine = async () => {
+    const newState = !engineStarted;
     if (engineStarted) {
       stopEngine();
     } else {
       await startEngine();
     }
+    if (peer.connected) peer.broadcastState({ engineStarted: newState });
   };
 
   const handlePackChange = (id: string) => {
@@ -203,7 +259,7 @@ export default function App() {
     restartEngineSmoothly();
   };
 
-  const displaySpeed = (mode === 'gps' || mode === 'sensor' || mode === 'solo') ? gpsSpeed : speed;
+  const finalDisplaySpeed = (isClientRole && syncedSpeed !== null) ? syncedSpeed : localDisplaySpeed;
 
   return (
     <ThemeProvider theme={darkTheme}>
@@ -215,10 +271,8 @@ export default function App() {
         </Box>
       ) : (
         <Box sx={{ height: '100vh', width: '100vw', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          {/* Silence Audio im Hintergrund */}
           <audio src="/silence.mp3" loop autoPlay playsInline style={{ display: 'none' }} />
 
-          {/* --- TOP BAR --- */}
           <Box sx={{ display: 'flex', justifyContent: 'center', p: 3, position: 'relative' }}>
             <Box sx={{
               position: 'absolute',
@@ -248,7 +302,6 @@ export default function App() {
             </ToggleButtonGroup>
           </Box>
 
-          {/* --- SENSOR & NETZWERK UI --- */}
           {(mode === 'sensor' || mode === 'solo') && (
             <Box sx={{ display: 'flex', justifyContent: 'center', px: 3, mt: 2 }}>
               <Paper elevation={0} sx={{ p: 3, borderRadius: 4, bgcolor: 'background.paper', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, maxWidth: 500, width: '100%' }}>
@@ -262,7 +315,6 @@ export default function App() {
                           <Typography variant="h3" color="primary" sx={{ letterSpacing: 8, fontWeight: 'bold' }}>{peer.peerId}</Typography>
                         </Box>
 
-                        {/* QR Code Generierung */}
                         <Box sx={{ p: 2, bgcolor: '#ffffff', borderRadius: 2 }}>
                           <QRCodeSVG
                             value={`${window.location.origin}${window.location.pathname}?pin=${peer.peerId}`}
@@ -279,7 +331,7 @@ export default function App() {
                     <Divider sx={{ width: '100%' }}>ODER</Divider>
                     <Stack direction="row" spacing={1} sx={{ width: '100%' }}>
                       <TextField fullWidth size="small" placeholder="Handy-PIN eingeben" value={joinCode} onChange={e => setJoinCode(e.target.value.replace(/\D/g, '').slice(0, 4))} />
-                      <Button variant="contained" disabled={joinCode.length < 4} onClick={() => peer.connectToServer(joinCode)}>Verbinden</Button>
+                      <Button variant="contained" disabled={joinCode.length < 4} onClick={() => { setIsClientRole(true); peer.connectToServer(joinCode); }}>Verbinden</Button>
                     </Stack>
                   </Stack>
                 )}
@@ -304,15 +356,13 @@ export default function App() {
             </Box>
           )}
 
-          {/* --- DASHBOARD / TACHO --- */}
           <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-            <Dashboard speed={displaySpeed} onStop={toggleEngine} />
+            <Dashboard speed={finalDisplaySpeed} onStop={toggleEngine} />
             {(mode === 'gps' || mode === 'sensor') && gpsError && (
               <Typography color="error" variant="body2" sx={{ mt: 2 }}>{gpsError}</Typography>
             )}
           </Box>
 
-          {/* --- THROTTLE / GASPEDAL BEREICH --- */}
           <Box sx={{ p: 4, display: 'flex', justifyContent: 'center', minHeight: '120px' }}>
             {mode === 'manual' ? (
               <Controls targetLoad={targetLoad} setTargetLoad={setTargetLoad} />
@@ -325,7 +375,6 @@ export default function App() {
             )}
           </Box>
 
-          {/* EINSTELLUNGEN DRAWER */}
           <SettingsDrawer
             open={settingsOpen} onClose={() => setSettingsOpen(false)}
             packId={packId} handlePackChange={handlePackChange}
