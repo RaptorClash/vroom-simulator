@@ -259,16 +259,25 @@ export default function App() {
 
   const finalDisplaySpeed = (isClientRole && syncedSpeed !== null) ? syncedSpeed : localDisplaySpeed;
 
+  const absSpeed = Math.abs(finalDisplaySpeed);
+  const gearSpeedRange = maxSpd / gears;
+  const currentGear = Math.min(gears, Math.max(1, Math.ceil(absSpeed / gearSpeedRange)));
+
+  const speedInGear = absSpeed - (gearSpeedRange * (currentGear - 1));
+  const rpmRatio = Math.max(0, Math.min(1, speedInGear / gearSpeedRange));
+
+  const displayRpm = Math.round(800 + rpmRatio * 6200);
+
   return (
     <ThemeProvider theme={darkTheme}>
       <CssBaseline />
       {!hasInteracted ? (
-        <Box onClick={handleStart} sx={{ height: '100vh', width: '100vw', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', '&:hover': { bgcolor: '#181818' }, transition: '0.3s' }}>
+        <Box onClick={handleStart} sx={{ height: '100dvh', width: '100vw', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', '&:hover': { bgcolor: '#181818' }, transition: '0.3s' }}>
           <Typography variant="h2" sx={{ fontWeight: 900, letterSpacing: 4, mb: 2, color: 'primary.main' }}>VROOM</Typography>
           <Typography variant="h6" sx={{ color: 'text.secondary' }}>TAP ANYWHERE TO START</Typography>
         </Box>
       ) : (
-        <Box sx={{ height: '100vh', width: '100vw', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <Box sx={{ height: '100dvh', width: '100vw', display: 'flex', flexDirection: 'column', overflowY: 'auto', overflowX: 'hidden' }}>
           <audio src="/silence.mp3" loop autoPlay playsInline style={{ display: 'none' }} />
 
           <Box sx={{
@@ -391,13 +400,20 @@ export default function App() {
             )}
           </Box>
 
-          <Box sx={{ p: 4, display: 'flex', justifyContent: 'center', minHeight: '120px' }}>
+          <Box sx={{ p: { xs: 2, sm: 4 }, display: 'flex', justifyContent: 'center', minHeight: '120px', pb: { xs: 4, sm: 4 } }}>
             {mode === 'manual' ? (
               <Controls targetLoad={targetLoad} setTargetLoad={setTargetLoad} />
             ) : (
               <Box sx={{ width: '100%', maxWidth: 600, textAlign: 'center' }}>
-                <Typography variant="overline" color="text.secondary">THROTTLE / LOAD</Typography>
-                <LinearProgress variant="determinate" value={Math.max(0, Math.min(100, targetLoad * 100))} sx={{ height: 6, borderRadius: 3, mt: 1 }} />
+                <Stack sx={{ mb: 1, px: 1 }}>
+                  <Typography variant="overline" color="text.secondary" sx={{ lineHeight: 1 }}>
+                    THROTTLE / LOAD
+                  </Typography>
+                  <Typography variant="overline" color="primary" sx={{ lineHeight: 1, fontWeight: 'bold' }}>
+                    {displayRpm} RPM (GANG {currentGear})
+                  </Typography>
+                </Stack>
+                <LinearProgress variant="determinate" value={Math.max(0, Math.min(100, targetLoad * 100))} sx={{ height: 8, borderRadius: 4 }} />
                 {targetLoad < 0 && <Typography color="error" variant="caption" sx={{ display: 'block', mt: 1 }}>Bremsend ({Math.round(targetLoad * -100)}%)</Typography>}
               </Box>
             )}
