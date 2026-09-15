@@ -145,10 +145,10 @@ export default function App() {
   }, [packId, masterVol, engineVol, spotVol, maxSpd, gears, shiftPt, turnUrl, turnUser, turnPass, spotifyClientId, driverSide, peer]);
 
   useEffect(() => {
-    if (mode === 'sensor' || mode === 'solo') {
+    if (mode === 'solo' || (mode === 'sensor' && isClientRole)) {
       setTargetLoad(sensor.load);
     }
-  }, [sensor.load, mode, setTargetLoad]);
+  }, [sensor.load, mode, isClientRole, setTargetLoad]);
 
   useEffect(() => {
     if (peer.connected && isClientRole && !isReceivingSync.current) {
