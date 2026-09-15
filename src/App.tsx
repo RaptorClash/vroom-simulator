@@ -145,15 +145,19 @@ export default function App() {
   }, [packId, masterVol, engineVol, spotVol, maxSpd, gears, shiftPt, turnUrl, turnUser, turnPass, spotifyClientId, driverSide, peer]);
 
   useEffect(() => {
-    if (peer.connected && !isReceivingSync.current) {
+    if (mode === 'sensor' || mode === 'solo') {
+      setTargetLoad(sensor.load);
+    }
+  }, [sensor.load, mode, setTargetLoad]);
+
+  useEffect(() => {
+    if (peer.connected && isClientRole && !isReceivingSync.current) {
       peer.broadcastState({
-        targetLoad: mode === 'sensor' ? sensor.load : targetLoad,
+        targetLoad: sensor.load,
         isPaused: sensor.isPaused
       });
     }
-    if (mode === 'solo' && engineStarted) setTargetLoad(sensor.load);
-  }, [sensor.load, targetLoad, sensor.isPaused, mode, peer, engineStarted, setTargetLoad]);
-
+  }, [sensor.load, sensor.isPaused, peer, isClientRole]);
   useEffect(() => {
     if ((mode !== 'gps' && mode !== 'sensor' && mode !== 'solo') || !engineStarted) {
       if (mode === 'manual' && engineStarted) setTargetLoad(0);

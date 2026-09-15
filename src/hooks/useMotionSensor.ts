@@ -43,7 +43,7 @@ export function useMotionSensor() {
             return;
         }
 
-        const handleOrientation = (event: DeviceOrientationEvent) => {
+const handleOrientation = (event: DeviceOrientationEvent) => {
             const pitch = event.beta;
             if (pitch === null) return;
 
@@ -55,12 +55,12 @@ export function useMotionSensor() {
 
             const diff = baselineRef.current - pitch;
 
-            const maxTilt = 30;
+            const maxTilt = 30
             let calculatedLoad = diff / maxTilt;
 
             calculatedLoad = Math.max(-1, Math.min(1, calculatedLoad));
 
-            if (Math.abs(calculatedLoad) < 0.1) {
+            if (Math.abs(calculatedLoad) < 0.05) {
                 calculatedLoad = 0;
             }
 
