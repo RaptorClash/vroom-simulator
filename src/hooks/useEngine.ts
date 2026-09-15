@@ -9,7 +9,7 @@ export function useEngine(
     maxSpeed: number,
     uiGears: number,
     uiShiftPoint: number,
-    mode: 'gps' | 'manual' | 'sensor' = 'manual',
+    mode: 'gps' | 'manual' | 'sensor' | 'solo' = 'manual',
     gpsSpeed: number = 0
 ) {
     const [engineStarted, setEngineStarted] = useState(false);

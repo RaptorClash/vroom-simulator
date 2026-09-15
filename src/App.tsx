@@ -1,23 +1,20 @@
 import { useState, useEffect } from 'react';
-import { ThemeProvider, createTheme, CssBaseline, Box, Typography, ToggleButtonGroup, ToggleButton, LinearProgress, IconButton, Drawer, Slider, Divider, keyframes, Button, TextField, Stack } from '@mui/material';
+import { ThemeProvider, createTheme, CssBaseline, Box, Typography, ToggleButtonGroup, ToggleButton, LinearProgress, IconButton, Button, TextField, Stack, Paper, Divider } from '@mui/material';
 import { FaPowerOff, FaGear, FaLink, FaMobileScreen, FaCar, FaPause, FaPlay, FaArrowsToEye } from 'react-icons/fa6';
+import { QRCodeSVG } from 'qrcode.react';
 import { soundPacks } from './audio/soundManager';
 import { useEngine } from './hooks/useEngine';
 import { useMotionSensor } from './hooks/useMotionSensor';
 import type { SyncState } from './hooks/usePeer';
 import { usePeer } from './hooks/usePeer';
-import { PackSelector } from './components/PackSelector';
 import { Dashboard } from './components/Dashboard';
 import { Controls } from './components/Controls';
-import { SpotifyPanel } from './components/SpotifyPanel';
-import { FaServer } from 'react-icons/fa6';
+import { SettingsDrawer } from './components/SettingsDrawer';
 
 const darkTheme = createTheme({
   palette: { mode: 'dark', background: { default: '#121212', paper: '#1e1e1e' }, primary: { main: '#f43f5e' } },
   typography: { fontFamily: 'system-ui, "Segoe UI", Roboto, sans-serif' }
 });
-
-const pulseAnim = keyframes`0% { opacity: 0.4; transform: scale(0.98); } 50% { opacity: 1; transform: scale(1.02); } 100% { opacity: 0.4; transform: scale(0.98); }`;
 
 const getNum = (k: string, d: number) => { try { const v = localStorage.getItem(k); return v ? parseFloat(v) : d; } catch { return d; } };
 const getStr = (k: string, d: string) => { try { const v = localStorage.getItem(k); return v ? v : d; } catch { return d; } };
@@ -25,6 +22,8 @@ const getStr = (k: string, d: string) => { try { const v = localStorage.getItem(
 export default function App() {
   const [hasInteracted, setHasInteracted] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const [driverSide, setDriverSide] = useState<'left' | 'right'>(() => getStr('vr_side', 'right') as 'left' | 'right');
 
   const [packId, setPackId] = useState(() => getStr('vr_pack', soundPacks[0]?.id || ''));
   const [masterVol, setMasterVol] = useState(() => getNum('vr_mvol', 100));
@@ -34,33 +33,48 @@ export default function App() {
   const [gears, setGears] = useState(() => getNum('vr_grs', 6));
   const [shiftPt, setShiftPt] = useState(() => getNum('vr_shft', 1.0));
 
-  const [mode, setMode] = useState<'gps' | 'manual' | 'sensor'>('gps');
+  const [mode, setMode] = useState<'gps' | 'manual' | 'sensor' | 'solo'>('gps');
   const [gpsSpeed, setGpsSpeed] = useState(0);
   const [gpsError, setGpsError] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [isRestarting, setIsRestarting] = useState(false);
-  const [turnUrl, setTurnUrl] = useState(() => getStr('vr_turn_url', ''));
-  const [turnUser, setTurnUser] = useState(() => getStr('vr_turn_user', ''));
-  const [turnPass, setTurnPass] = useState(() => getStr('vr_turn_pass', ''));
+
+  const [turnUrl, setTurnUrl] = useState(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      if (p.has('turn')) return atob(p.get('turn')!);
+    } catch (e) { console.error("URL Parameter Fehler", e); }
+    return getStr('vr_turn_url', '');
+  });
+
+  const [turnUser, setTurnUser] = useState(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      if (p.has('user')) return atob(p.get('user')!);
+    } catch (e) { console.error("URL Parameter Fehler", e); }
+    return getStr('vr_turn_user', '');
+  });
+
+  const [turnPass, setTurnPass] = useState(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      if (p.has('pass')) return atob(p.get('pass')!);
+    } catch (e) { console.error("URL Parameter Fehler", e); }
+    return getStr('vr_turn_pass', '');
+  });
 
   const sensor = useMotionSensor();
-
   const { engineStarted, speed, targetLoad, setTargetLoad, startEngine, stopEngine } = useEngine(
-    packId, (masterVol / 100) * engineVol, maxSpd, gears, shiftPt, mode, gpsSpeed
+    packId, (masterVol / 100) * engineVol, maxSpd, gears, shiftPt, mode === 'solo' ? 'sensor' : mode, gpsSpeed
   );
+
   const restartEngineSmoothly = () => {
-    if (engineStarted) {
-      stopEngine();
-      setIsRestarting(true);
-    }
+    if (engineStarted) { stopEngine(); setIsRestarting(true); }
   };
 
   useEffect(() => {
     if (isRestarting) {
-      const timer = setTimeout(() => {
-        startEngine();
-        setIsRestarting(false);
-      }, 400);
+      const timer = setTimeout(() => { startEngine(); setIsRestarting(false); }, 400);
       return () => clearTimeout(timer);
     }
   }, [isRestarting, packId, startEngine]);
@@ -73,7 +87,6 @@ export default function App() {
     if (state.maxSpeed !== undefined) setMaxSpd(state.maxSpeed);
     if (state.gears !== undefined) setGears(state.gears);
     if (state.shiftPoint !== undefined) setShiftPt(state.shiftPoint);
-
     if (state.packId !== undefined && state.packId !== packId) {
       setPackId(state.packId);
       restartEngineSmoothly();
@@ -83,60 +96,35 @@ export default function App() {
   const peer = usePeer(handleIncomingSync);
 
   useEffect(() => {
-    if (peer.error) {
-      console.error('[Vroom] Netzwerk:', peer.error);
-    }
-  }, [peer.error]);
-
-  useEffect(() => {
-    if ((mode !== 'gps' && mode !== 'sensor') || !engineStarted) {
+    if ((mode !== 'gps' && mode !== 'sensor' && mode !== 'solo') || !engineStarted) {
       if (mode === 'manual' && engineStarted) setTargetLoad(0);
       return;
     }
-
-    let lastSpeedKmh = 0;
-    let lastTime = Date.now();
-    const speedBuffer: number[] = [];
-
+    let lastSpeedKmh = 0; let lastTime = Date.now(); const speedBuffer: number[] = [];
     const watchId = navigator.geolocation.watchPosition(
       (position: GeolocationPosition) => {
         setGpsError('');
         const rawSpeed = (position.coords.speed || 0) * 3.6;
-
         speedBuffer.push(rawSpeed);
         if (speedBuffer.length > 3) speedBuffer.shift();
         const currentSpeedKmh = speedBuffer.reduce((a, b) => a + b, 0) / speedBuffer.length;
-
         setGpsSpeed(currentSpeedKmh);
-
         if (mode === 'gps') {
           const now = Date.now();
           const dt = (now - lastTime) / 1000;
-
           if (dt >= 0.5) {
             const acceleration = (currentSpeedKmh - lastSpeedKmh) / dt;
-            let newLoad: number;
-
-            if (acceleration <= 0.1) newLoad = 0.0;
-            else if (acceleration > 2.0) newLoad = 1.0;
-            else if (acceleration > 0.5) newLoad = 0.6;
-            else newLoad = 0.25;
-
+            const newLoad = acceleration <= 0.1 ? 0.0 : acceleration > 2.0 ? 1.0 : acceleration > 0.5 ? 0.6 : 0.25;
             setTargetLoad(newLoad);
-            lastSpeedKmh = currentSpeedKmh;
-            lastTime = now;
+            lastSpeedKmh = currentSpeedKmh; lastTime = now;
           }
         }
       },
-      () => {
-        setGpsError("GPS Signal konnte nicht abgerufen werden.");
-        if (mode === 'gps') setTargetLoad(0);
-      },
+      () => { setGpsError("GPS Signal konnte nicht abgerufen werden."); if (mode === 'gps') setTargetLoad(0); },
       { enableHighAccuracy: true, maximumAge: 1000 }
     );
     return () => navigator.geolocation.clearWatch(watchId);
   }, [mode, engineStarted, setTargetLoad]);
-
 
   useEffect(() => {
     localStorage.setItem('vr_pack', packId);
@@ -149,102 +137,182 @@ export default function App() {
     localStorage.setItem('vr_turn_url', turnUrl);
     localStorage.setItem('vr_turn_user', turnUser);
     localStorage.setItem('vr_turn_pass', turnPass);
+    localStorage.setItem('vr_side', driverSide);
+
     peer.broadcastState({ packId, masterVol, engineVol, spotifyVol: spotVol, maxSpeed: maxSpd, gears, shiftPoint: shiftPt });
-  }, [packId, masterVol, engineVol, spotVol, maxSpd, gears, shiftPt, turnUrl, turnUser, turnPass, peer]);
+  }, [packId, masterVol, engineVol, spotVol, maxSpd, gears, shiftPt, turnUrl, turnUser, turnPass, driverSide, peer]);
+
   useEffect(() => {
-    if (mode === 'sensor' && peer.connected) {
-      peer.broadcastState({ targetLoad: sensor.load });
+    if (mode === 'sensor' && peer.connected) peer.broadcastState({ targetLoad: sensor.load });
+    if (mode === 'solo' && engineStarted) setTargetLoad(sensor.load);
+  }, [sensor.load, mode, peer, engineStarted, setTargetLoad]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    let urlChanged = false;
+
+    if (params.has('turn') || params.has('user') || params.has('pass')) {
+      urlChanged = true;
     }
-  }, [sensor.load, mode, peer]);
+    if (params.has('spotId')) {
+      try {
+        localStorage.setItem('spotify_client_id', atob(params.get('spotId')!));
+      } catch (e) {
+        console.error("Spotify ID Error", e);
+      }
+      urlChanged = true;
+    }
+
+    if (params.has('pin')) {
+      const autoPin = params.get('pin')!;
+
+      setTimeout(() => {
+        setMode('sensor');
+        setJoinCode(autoPin);
+        peer.connectToServer(autoPin);
+      }, 300);
+
+      urlChanged = true;
+    }
+
+    if (urlChanged) {
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
 
   const handleStart = async () => { setHasInteracted(true); await startEngine(); };
-  const handleStop = () => { stopEngine(); setHasInteracted(false); setSettingsOpen(false); };
+
+  const toggleEngine = async () => {
+    if (engineStarted) {
+      stopEngine();
+    } else {
+      await startEngine();
+    }
+  };
 
   const handlePackChange = (id: string) => {
     setPackId(id);
     const pack = soundPacks.find(p => p.id === id);
-    let newGears = gears;
-    let newShiftPt = shiftPt;
-
+    let newGears = gears; let newShiftPt = shiftPt;
     if (pack) {
       newGears = pack.config?.gears || 6;
       newShiftPt = pack.config?.shiftPoint || 1.0;
-      setGears(newGears);
-      setShiftPt(newShiftPt);
+      setGears(newGears); setShiftPt(newShiftPt);
     }
-
     peer.broadcastState({ packId: id, gears: newGears, shiftPoint: newShiftPt });
     restartEngineSmoothly();
   };
 
-  const displaySpeed = (mode === 'gps' || mode === 'sensor') ? gpsSpeed : speed;
+  const displaySpeed = (mode === 'gps' || mode === 'sensor' || mode === 'solo') ? gpsSpeed : speed;
 
   return (
     <ThemeProvider theme={darkTheme}>
       <CssBaseline />
-
       {!hasInteracted ? (
-        <Box onClick={handleStart} sx={{ height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', '&:hover': { bgcolor: '#181818' }, transition: '0.3s' }}>
+        <Box onClick={handleStart} sx={{ height: '100vh', width: '100vw', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', '&:hover': { bgcolor: '#181818' }, transition: '0.3s' }}>
           <Typography variant="h2" sx={{ fontWeight: 900, letterSpacing: 4, mb: 2, color: 'primary.main' }}>VROOM</Typography>
-          <Typography variant="h6" sx={{ color: 'text.secondary', animation: `${pulseAnim} 2s infinite` }}>TAP ANYWHERE TO START</Typography>
+          <Typography variant="h6" sx={{ color: 'text.secondary' }}>TAP ANYWHERE TO START</Typography>
         </Box>
       ) : (
-        <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <Box sx={{ height: '100vh', width: '100vw', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {/* Silence Audio im Hintergrund */}
           <audio src="/silence.mp3" loop autoPlay playsInline style={{ display: 'none' }} />
 
+          {/* --- TOP BAR --- */}
           <Box sx={{ display: 'flex', justifyContent: 'center', p: 3, position: 'relative' }}>
-            <ToggleButtonGroup color="primary" value={mode} exclusive onChange={(_, m) => m && setMode(m)} size="small" sx={{ bgcolor: 'rgba(255,255,255,0.05)', borderRadius: 20 }}>
+            <Box sx={{
+              position: 'absolute',
+              left: driverSide === 'left' ? 24 : 'auto',
+              right: driverSide === 'right' ? 24 : 'auto',
+              display: 'flex', gap: 2
+            }}>
+              <IconButton onClick={() => setSettingsOpen(true)} sx={{ bgcolor: 'background.paper', border: '1px solid rgba(255,255,255,0.1)' }}><FaGear /></IconButton>
+
+              <IconButton
+                onClick={toggleEngine}
+                sx={{
+                  bgcolor: engineStarted ? 'rgba(255,0,0,0.1)' : 'rgba(16,185,129,0.1)',
+                  color: engineStarted ? '#f43f5e' : '#10b981',
+                  border: engineStarted ? '1px solid rgba(244,63,94,0.2)' : '1px solid rgba(16,185,129,0.2)'
+                }}
+              >
+                <FaPowerOff />
+              </IconButton>
+            </Box>
+
+            <ToggleButtonGroup color="primary" value={mode} exclusive onChange={(_, m) => m && setMode(m)} size="small" sx={{ bgcolor: 'background.paper', borderRadius: 20 }}>
               <ToggleButton value="gps"><FaCar style={{ marginRight: 8 }} /> AUTO</ToggleButton>
               <ToggleButton value="manual">MANUAL</ToggleButton>
               <ToggleButton value="sensor"><FaMobileScreen style={{ marginRight: 8 }} /> SENSOR</ToggleButton>
+              <ToggleButton value="solo">SOLO</ToggleButton>
             </ToggleButtonGroup>
-
-            <Box sx={{ position: 'absolute', right: 24, display: 'flex', gap: 2 }}>
-              <IconButton onClick={() => setSettingsOpen(true)} sx={{ bgcolor: 'rgba(255,255,255,0.05)' }}><FaGear /></IconButton>
-              <IconButton onClick={handleStop} sx={{ bgcolor: 'rgba(255,0,0,0.1)', color: '#f43f5e' }}><FaPowerOff /></IconButton>
-            </Box>
           </Box>
 
-          {/* NETZWERK & SENSOR BEREICH */}
-          {mode === 'sensor' && (
-            <Box sx={{ p: 2, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, bgcolor: 'rgba(0,0,0,0.2)' }}>
-              {!peer.connected ? (
-                <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
-                  {peer.peerId ? (
-                    <Typography variant="h5" color="primary" sx={{ letterSpacing: 5 }}>PIN: {peer.peerId}</Typography>
-                  ) : (
-                    <Button variant="outlined" onClick={peer.hostServer}>Als Auto (Host) starten</Button>
-                  )}
-                  <Typography>ODER</Typography>
-                  <TextField size="small" placeholder="PIN" value={joinCode} onChange={e => setJoinCode(e.target.value.replace(/\D/g, '').slice(0, 4))} />
-                  <Button variant="contained" disabled={joinCode.length < 4} onClick={() => peer.connectToServer(joinCode)}>Verbinden</Button>
-                </Stack>
-              ) : (
-                <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
-                  <Typography color="success.main" sx={{ fontWeight: 'bold' }}><FaLink /> VERBUNDEN</Typography>
+          {/* --- SENSOR & NETZWERK UI --- */}
+          {(mode === 'sensor' || mode === 'solo') && (
+            <Box sx={{ display: 'flex', justifyContent: 'center', px: 3, mt: 2 }}>
+              <Paper elevation={0} sx={{ p: 3, borderRadius: 4, bgcolor: 'background.paper', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, maxWidth: 500, width: '100%' }}>
 
-                  {!sensor.hasPermission ? (
-                    <Button variant="contained" color="secondary" onClick={sensor.requestAccess}>Sensoren freigeben</Button>
-                  ) : (
-                    <>
-                      <Button variant="outlined" color="warning" onClick={sensor.calibrate} startIcon={<FaArrowsToEye />}>Kalibrieren</Button>
-                      <Button variant="contained" color={sensor.isPaused ? "success" : "error"} onClick={sensor.togglePause} startIcon={sensor.isPaused ? <FaPlay /> : <FaPause />}>
-                        {sensor.isPaused ? "Fortsetzen" : "Pausieren"}
-                      </Button>
-                    </>
-                  )}
-                </Stack>
-              )}
+                {mode === 'sensor' && !peer.connected && (
+                  <Stack direction="column" spacing={3} sx={{ width: '100%', alignItems: 'center' }}>
+                    {peer.peerId ? (
+                      <Box sx={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                        <Box>
+                          <Typography variant="overline" color="text.secondary">DEIN HOST-PIN</Typography>
+                          <Typography variant="h3" color="primary" sx={{ letterSpacing: 8, fontWeight: 'bold' }}>{peer.peerId}</Typography>
+                        </Box>
+
+                        {/* QR Code Generierung */}
+                        <Box sx={{ p: 2, bgcolor: '#ffffff', borderRadius: 2 }}>
+                          <QRCodeSVG
+                            value={`${window.location.origin}${window.location.pathname}?pin=${peer.peerId}`}
+                            size={160}
+                          />
+                        </Box>
+                        <Typography variant="caption" color="text.secondary">
+                          Mit dem Handy scannen zum automatischen Verbinden
+                        </Typography>
+                      </Box>
+                    ) : (
+                      <Button variant="outlined" size="large" onClick={peer.hostServer} sx={{ width: '100%' }}>Als Auto (Host) starten</Button>
+                    )}
+                    <Divider sx={{ width: '100%' }}>ODER</Divider>
+                    <Stack direction="row" spacing={1} sx={{ width: '100%' }}>
+                      <TextField fullWidth size="small" placeholder="Handy-PIN eingeben" value={joinCode} onChange={e => setJoinCode(e.target.value.replace(/\D/g, '').slice(0, 4))} />
+                      <Button variant="contained" disabled={joinCode.length < 4} onClick={() => peer.connectToServer(joinCode)}>Verbinden</Button>
+                    </Stack>
+                  </Stack>
+                )}
+
+                {(mode === 'solo' || (mode === 'sensor' && peer.connected)) && (
+                  <Stack direction="column" spacing={2} sx={{ width: '100%', alignItems: 'center' }}>
+                    {mode === 'sensor' && <Typography color="success.main" sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}><FaLink /> Erfolgreich verbunden</Typography>}
+
+                    {!sensor.hasPermission ? (
+                      <Button variant="contained" color="primary" size="large" fullWidth onClick={sensor.requestAccess}>Sensoren aktivieren</Button>
+                    ) : (
+                      <Stack direction="row" spacing={2} sx={{ width: '100%' }}>
+                        <Button fullWidth variant="outlined" color="inherit" onClick={sensor.calibrate} startIcon={<FaArrowsToEye />}>Kalibrieren</Button>
+                        <Button fullWidth variant={sensor.isPaused ? "contained" : "outlined"} color={sensor.isPaused ? "primary" : "inherit"} onClick={sensor.togglePause} startIcon={sensor.isPaused ? <FaPlay /> : <FaPause />}>
+                          {sensor.isPaused ? "Fortsetzen" : "Pausieren"}
+                        </Button>
+                      </Stack>
+                    )}
+                  </Stack>
+                )}
+              </Paper>
             </Box>
           )}
 
+          {/* --- DASHBOARD / TACHO --- */}
           <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-            <Dashboard speed={displaySpeed} onStop={handleStop} />
+            <Dashboard speed={displaySpeed} onStop={toggleEngine} />
             {(mode === 'gps' || mode === 'sensor') && gpsError && (
               <Typography color="error" variant="body2" sx={{ mt: 2 }}>{gpsError}</Typography>
             )}
           </Box>
 
+          {/* --- THROTTLE / GASPEDAL BEREICH --- */}
           <Box sx={{ p: 4, display: 'flex', justifyContent: 'center', minHeight: '120px' }}>
             {mode === 'manual' ? (
               <Controls targetLoad={targetLoad} setTargetLoad={setTargetLoad} />
@@ -252,58 +320,26 @@ export default function App() {
               <Box sx={{ width: '100%', maxWidth: 600, textAlign: 'center' }}>
                 <Typography variant="overline" color="text.secondary">THROTTLE / LOAD</Typography>
                 <LinearProgress variant="determinate" value={Math.max(0, Math.min(100, targetLoad * 100))} sx={{ height: 6, borderRadius: 3, mt: 1 }} />
-                {targetLoad < 0 && <Typography color="error" variant="caption">Bremsend ({Math.round(targetLoad * -100)}%)</Typography>}
+                {targetLoad < 0 && <Typography color="error" variant="caption" sx={{ display: 'block', mt: 1 }}>Bremsend ({Math.round(targetLoad * -100)}%)</Typography>}
               </Box>
             )}
           </Box>
 
-          {/* SETTINGS DRAWER */}
-          <Drawer anchor="right" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
-            <Box sx={{ width: { xs: '100vw', sm: 400 }, p: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <Typography variant="h5">Einstellungen</Typography>
-              <PackSelector soundPacks={soundPacks} selectedId={packId} onChange={handlePackChange} />
-              <Divider />
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <Typography variant="overline" color="primary" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <FaServer /> Netzwerk (Relay)
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  Wird benötigt für LTE-zu-LTE Verbindungen. (z.B. von rstream.io)
-                </Typography>
-                <TextField
-                  size="small"
-                  label="TURN URLs (kommagetrennt)"
-                  placeholder="turn:aws-eu-west-3-1.c.rstream.io:3478?transport=udp"
-                  value={turnUrl}
-                  onChange={(e) => setTurnUrl(e.target.value)}
-                />
-                <TextField
-                  size="small"
-                  label="Username"
-                  placeholder="Username"
-                  value={turnUser}
-                  onChange={(e) => setTurnUser(e.target.value)}
-                />
-                <TextField
-                  size="small"
-                  label="Credential"
-                  type="password"
-                  placeholder="Passwort"
-                  value={turnPass}
-                  onChange={(e) => setTurnPass(e.target.value)}
-                />
-              </Box>
-
-              <Divider />
-              <Box>
-                <Typography variant="overline" color="primary">FAHRZEUG</Typography>
-                <Slider value={maxSpd} min={100} max={400} step={10} onChange={(_, v) => setMaxSpd(v as number)} />
-                <Slider value={gears} min={1} max={10} step={1} marks onChange={(_, v) => setGears(v as number)} />
-                <Slider value={shiftPt} min={0.5} max={1.0} step={0.05} onChange={(_, v) => setShiftPt(v as number)} />
-              </Box>
-              <SpotifyPanel volume={(masterVol / 100) * (spotVol / 100)} />
-            </Box>
-          </Drawer>
+          {/* EINSTELLUNGEN DRAWER */}
+          <SettingsDrawer
+            open={settingsOpen} onClose={() => setSettingsOpen(false)}
+            packId={packId} handlePackChange={handlePackChange}
+            masterVol={masterVol} setMasterVol={setMasterVol}
+            engineVol={engineVol} setEngineVol={setEngineVol}
+            spotVol={spotVol} setSpotVol={setSpotVol}
+            maxSpd={maxSpd} setMaxSpd={setMaxSpd}
+            gears={gears} setGears={setGears}
+            shiftPt={shiftPt} setShiftPt={setShiftPt}
+            turnUrl={turnUrl} setTurnUrl={setTurnUrl}
+            turnUser={turnUser} setTurnUser={setTurnUser}
+            turnPass={turnPass} setTurnPass={setTurnPass}
+            driverSide={driverSide} setDriverSide={setDriverSide}
+          />
         </Box>
       )}
     </ThemeProvider>
