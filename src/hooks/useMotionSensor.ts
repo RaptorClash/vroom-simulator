@@ -30,6 +30,7 @@ export function useMotionSensor() {
 
     const calibrate = useCallback(() => {
         baselineRef.current = null;
+        setLoad(0);
     }, []);
 
     const togglePause = useCallback(() => {
@@ -52,14 +53,16 @@ export function useMotionSensor() {
                 return;
             }
 
-            const diff = pitch - baselineRef.current;
+            const diff = baselineRef.current - pitch;
 
-            const maxTilt = 20;
+            const maxTilt = 30;
             let calculatedLoad = diff / maxTilt;
 
             calculatedLoad = Math.max(-1, Math.min(1, calculatedLoad));
 
-            if (Math.abs(calculatedLoad) < 0.05) calculatedLoad = 0;
+            if (Math.abs(calculatedLoad) < 0.1) {
+                calculatedLoad = 0;
+            }
 
             setLoad(calculatedLoad);
         };

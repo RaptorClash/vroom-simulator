@@ -37,6 +37,8 @@ export default function App() {
   const [joinCode, setJoinCode] = useState('');
   const [isRestarting, setIsRestarting] = useState(false);
   const [syncedSpeed, setSyncedSpeed] = useState<number | null>(null);
+  const [syncedRpm, setSyncedRpm] = useState<number | null>(null);
+  const [syncedRpmRatio, setSyncedRpmRatio] = useState<number | null>(null);
 
   const [turnUrl, setTurnUrl] = useState(() => {
     try { const p = new URLSearchParams(window.location.search); if (p.has('turn')) return atob(p.get('turn')!); } catch (e) { console.error(e); } return getStr('vr_turn_url', '');
@@ -53,7 +55,7 @@ export default function App() {
   const syncLockTimer = useRef<number | null>(null);
 
   const sensor = useMotionSensor();
-  const { engineStarted, speed, targetLoad, setTargetLoad, startEngine, stopEngine, rpmRatio } = useEngine(
+  const { engineStarted, speed, targetLoad, setTargetLoad, startEngine, stopEngine, rpm, rpmRatio } = useEngine(
     packId, isClientRole ? 0 : (masterVol / 100) * engineVol, maxSpd, gears, shiftPt, mode === 'solo' ? 'sensor' : mode, gpsSpeed
   );
 
@@ -98,6 +100,8 @@ export default function App() {
     if (state.syncedSpeed !== undefined) {
       setSyncedSpeed(state.syncedSpeed);
     }
+    if (state.rpm !== undefined) setSyncedRpm(state.rpm);
+    if (state.rpmRatio !== undefined) setSyncedRpmRatio(state.rpmRatio);
     if (state.packId !== undefined && state.packId !== stateRefs.current.packId) {
       setPackId(state.packId);
       restartEngineSmoothly();
@@ -184,16 +188,25 @@ export default function App() {
 
   const localDisplaySpeed = (mode === 'gps' || mode === 'sensor' || mode === 'solo') ? gpsSpeed : speed;
   const speedRef = useRef(localDisplaySpeed);
+  const rpmStateRef = useRef({ rpm: 0, rpmRatio: 0 });
 
   useEffect(() => {
     speedRef.current = localDisplaySpeed;
   }, [localDisplaySpeed]);
 
   useEffect(() => {
+    rpmStateRef.current = { rpm, rpmRatio };
+  }, [rpm, rpmRatio]);
+
+  useEffect(() => {
     if (peer.connected && !isClientRole) {
       const interval = setInterval(() => {
-        peer.broadcastState({ syncedSpeed: speedRef.current });
-      }, 250);
+        peer.broadcastState({
+          syncedSpeed: speedRef.current,
+          rpm: rpmStateRef.current.rpm,
+          rpmRatio: rpmStateRef.current.rpmRatio
+        });
+      }, 100);
       return () => clearInterval(interval);
     }
   }, [peer.connected, isClientRole, peer]);
@@ -263,8 +276,8 @@ export default function App() {
   const gearSpeedRange = maxSpd / gears;
   const currentGear = Math.min(gears, Math.max(1, Math.ceil(absSpeed / gearSpeedRange)));
 
-  const displayRpm = Math.round(800 + rpmRatio * 6200);
-
+  const displayRpm = (isClientRole && syncedRpm !== null) ? syncedRpm : rpm;
+  const displayRpmRatio = (isClientRole && syncedRpmRatio !== null) ? syncedRpmRatio : rpmRatio;
   return (
     <ThemeProvider theme={darkTheme}>
       <CssBaseline />
@@ -374,7 +387,7 @@ export default function App() {
                   <Stack direction="column" spacing={2} sx={{ width: '100%', alignItems: 'center' }}>
                     {mode === 'sensor' && <Typography color="success.main" sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}><FaLink /> Erfolgreich verbunden</Typography>}
 
-                    {!sensor.hasPermission ? (
+                    {(!sensor.hasPermission && (mode === 'solo' || isClientRole)) ? (
                       <Button variant="contained" color="primary" size="large" fullWidth onClick={sensor.requestAccess}>Sensoren aktivieren</Button>
                     ) : (
                       <Stack direction="row" spacing={2} sx={{ width: '100%' }}>
@@ -407,11 +420,10 @@ export default function App() {
                     THROTTLE / LOAD
                   </Typography>
                   <Typography variant="overline" color="primary" sx={{ lineHeight: 1, fontWeight: 'bold' }}>
-                    {displayRpm} RPM (GANG {currentGear})
+                    {displayRpm || 0} RPM (GANG {currentGear})
                   </Typography>
                 </Stack>
-                <LinearProgress variant="determinate" value={Math.max(0, Math.min(100, rpmRatio * 100)) || 0} sx={{ height: 8, borderRadius: 4 }} />
-
+                <LinearProgress variant="determinate" value={Math.max(0, Math.min(100, (displayRpmRatio || 0) * 100))} sx={{ height: 8, borderRadius: 4 }} />
                 {targetLoad < 0 && <Typography color="error" variant="caption" sx={{ display: 'block', mt: 1 }}>Bremsend ({Math.round(targetLoad * -100)}%)</Typography>}              </Box>
             )}
           </Box>

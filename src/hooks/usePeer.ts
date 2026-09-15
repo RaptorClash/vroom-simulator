@@ -19,6 +19,8 @@ export interface SyncState {
   syncedSpeed?: number;
   packId?: string;
   doCalibrate?: number;
+  rpm?: number;
+  rpmRatio?: number;
 }
 
 export function usePeer(onIncomingSync: (state: SyncState) => void) {
