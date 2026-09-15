@@ -37,35 +37,33 @@ export default function App() {
   const [joinCode, setJoinCode] = useState('');
   const [isRestarting, setIsRestarting] = useState(false);
   const [syncedSpeed, setSyncedSpeed] = useState<number | null>(null);
+
   const [turnUrl, setTurnUrl] = useState(() => {
-    try {
-      const p = new URLSearchParams(window.location.search);
-      if (p.has('turn')) return atob(p.get('turn')!);
-    } catch (e) { console.error("URL Parameter Fehler", e); }
-    return getStr('vr_turn_url', '');
+    try { const p = new URLSearchParams(window.location.search); if (p.has('turn')) return atob(p.get('turn')!); } catch (e) { console.error(e); } return getStr('vr_turn_url', '');
   });
   const [turnUser, setTurnUser] = useState(() => {
-    try {
-      const p = new URLSearchParams(window.location.search);
-      if (p.has('user')) return atob(p.get('user')!);
-    } catch (e) { console.error("URL Parameter Fehler", e); }
-    return getStr('vr_turn_user', '');
+    try { const p = new URLSearchParams(window.location.search); if (p.has('user')) return atob(p.get('user')!); } catch (e) { console.error(e); } return getStr('vr_turn_user', '');
   });
   const [turnPass, setTurnPass] = useState(() => {
-    try {
-      const p = new URLSearchParams(window.location.search);
-      if (p.has('pass')) return atob(p.get('pass')!);
-    } catch (e) { console.error("URL Parameter Fehler", e); }
-    return getStr('vr_turn_pass', '');
+    try { const p = new URLSearchParams(window.location.search); if (p.has('pass')) return atob(p.get('pass')!); } catch (e) { console.error(e); } return getStr('vr_turn_pass', '');
   });
   const [spotifyClientId, setSpotifyClientId] = useState(() => getStr('spotify_client_id', ''));
+
   const isReceivingSync = useRef(false);
+  const syncLockTimer = useRef<number | null>(null);
+
   const sensor = useMotionSensor();
   const { engineStarted, speed, targetLoad, setTargetLoad, startEngine, stopEngine } = useEngine(
     packId, isClientRole ? 0 : (masterVol / 100) * engineVol, maxSpd, gears, shiftPt, mode === 'solo' ? 'sensor' : mode, gpsSpeed
   );
+
+  const stateRefs = useRef({ engineStarted, packId, isPaused: sensor.isPaused });
+  useEffect(() => {
+    stateRefs.current = { engineStarted, packId, isPaused: sensor.isPaused };
+  }, [engineStarted, packId, sensor.isPaused]);
+
   const restartEngineSmoothly = () => {
-    if (engineStarted) { stopEngine(); setIsRestarting(true); }
+    if (stateRefs.current.engineStarted) { stopEngine(); setIsRestarting(true); }
   };
 
   useEffect(() => {
@@ -73,9 +71,11 @@ export default function App() {
       const timer = setTimeout(() => { startEngine(); setIsRestarting(false); }, 400);
       return () => clearTimeout(timer);
     }
-  }, [isRestarting, packId, startEngine]);
+  }, [isRestarting, startEngine]);
+
   const handleIncomingSync = (state: SyncState) => {
     isReceivingSync.current = true;
+    if (syncLockTimer.current) window.clearTimeout(syncLockTimer.current);
 
     if (state.targetLoad !== undefined) setTargetLoad(state.targetLoad);
     if (state.masterVol !== undefined) setMasterVol(state.masterVol);
@@ -89,16 +89,16 @@ export default function App() {
     if (state.turnPass !== undefined) setTurnPass(state.turnPass);
     if (state.spotifyClientId !== undefined) setSpotifyClientId(state.spotifyClientId);
 
-    if (state.engineStarted !== undefined && state.engineStarted !== engineStarted) {
+    if (state.engineStarted !== undefined && state.engineStarted !== stateRefs.current.engineStarted) {
       if (state.engineStarted) startEngine(); else stopEngine();
     }
-    if (state.isPaused !== undefined && state.isPaused !== sensor.isPaused) {
+    if (state.isPaused !== undefined && state.isPaused !== stateRefs.current.isPaused) {
       sensor.togglePause();
     }
     if (state.syncedSpeed !== undefined) {
       setSyncedSpeed(state.syncedSpeed);
     }
-    if (state.packId !== undefined && state.packId !== packId) {
+    if (state.packId !== undefined && state.packId !== stateRefs.current.packId) {
       setPackId(state.packId);
       restartEngineSmoothly();
     }
@@ -106,7 +106,7 @@ export default function App() {
       sensor.calibrate();
     }
 
-    setTimeout(() => { isReceivingSync.current = false; }, 50);
+    syncLockTimer.current = window.setTimeout(() => { isReceivingSync.current = false; }, 150);
   };
 
   const peer = usePeer(handleIncomingSync);
@@ -212,9 +212,7 @@ export default function App() {
         const decodedSpot = atob(params.get('spotId')!);
         localStorage.setItem('spotify_client_id', decodedSpot);
         setTimeout(() => setSpotifyClientId(decodedSpot), 0);
-      } catch (e) {
-        console.error("Spotify ID Error", e);
-      }
+      } catch (e) { console.error(e) }
       urlChanged = true;
     }
 
@@ -232,7 +230,7 @@ export default function App() {
     if (urlChanged) {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
-  }, []);
+  }, [peer]);
 
   const handleStart = async () => { setHasInteracted(true); await startEngine(); };
 
@@ -255,7 +253,7 @@ export default function App() {
       newShiftPt = pack.config?.shiftPoint || 1.0;
       setGears(newGears); setShiftPt(newShiftPt);
     }
-    peer.broadcastState({ packId: id, gears: newGears, shiftPoint: newShiftPt });
+    if (peer.connected) peer.broadcastState({ packId: id, gears: newGears, shiftPoint: newShiftPt });
     restartEngineSmoothly();
   };
 

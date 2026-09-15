@@ -85,12 +85,15 @@ export function SpotifyPanel({ volume, isClientRole }: SpotifyPanelProps) {
     const [currentTrack, setCurrentTrack] = useState<SpotifyTrack | null>(null);
     const [isPaused, setPaused] = useState<boolean>(true);
 
+    const [isPlayerReady, setIsPlayerReady] = useState(false);
+
     const hasFetchedToken = useRef<boolean>(false);
 
     const logout = useCallback(() => {
         setToken(null);
         setPlaylists([]);
         setSelectedPlaylist(null);
+        setIsPlayerReady(false);
         if (playerRef.current) {
             playerRef.current.disconnect();
             playerRef.current = null;
@@ -180,6 +183,8 @@ export function SpotifyPanel({ volume, isClientRole }: SpotifyPanelProps) {
         if (!token) return;
 
         const initSDK = () => {
+            if (playerRef.current) return;
+
             const spotifyPlayer = new window.Spotify.Player({
                 name: 'Vroom Simulator Web Player',
                 getOAuthToken: (cb) => { cb(token); },
@@ -191,11 +196,15 @@ export function SpotifyPanel({ volume, isClientRole }: SpotifyPanelProps) {
             spotifyPlayer.addListener('ready', (data: WebPlaybackReadyParams) => {
                 console.log('Player Ready with Device ID', data.device_id);
                 setDeviceId(data.device_id);
+                setIsPlayerReady(true);
                 setError(null);
+
+                spotifyPlayer.setVolume(isClientRole ? 0 : volume).catch(console.error);
             });
 
             spotifyPlayer.addListener('not_ready', (data: WebPlaybackReadyParams) => {
                 console.log('Device ID has gone offline', data.device_id);
+                setIsPlayerReady(false);
                 setDeviceId(null);
             });
 
@@ -215,15 +224,17 @@ export function SpotifyPanel({ volume, isClientRole }: SpotifyPanelProps) {
         }
 
         return () => {
+            setIsPlayerReady(false);
             if (playerRef.current) playerRef.current.disconnect();
+            playerRef.current = null;
         };
     }, [token]);
 
     useEffect(() => {
-        if (playerRef.current) {
-            playerRef.current.setVolume(isClientRole ? 0 : volume);
+        if (playerRef.current && isPlayerReady) {
+            playerRef.current.setVolume(isClientRole ? 0 : volume).catch(console.error);
         }
-    }, [volume, isClientRole]);
+    }, [volume, isClientRole, isPlayerReady]);
 
     const handleSaveClientId = () => {
         if (inputClientId.trim()) {
