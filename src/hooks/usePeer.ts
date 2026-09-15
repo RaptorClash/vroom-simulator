@@ -67,8 +67,13 @@ export function usePeer(onIncomingSync: (state: SyncState) => void) {
 
             newPeer.on('connection', (conn: DataConnection) => {
                 console.log('[Vroom] Host: eingehende Verbindung von:', conn.peer);
-                setConnection(conn);
-                setConnected(true);
+
+                conn.on('open', () => {
+                    console.log('[Vroom] Datenkanal ist jetzt offen zu:', conn.peer);
+
+                    setConnection(conn);
+                    setConnected(true);
+                });
 
                 conn.on('data', (data: unknown) => {
                     onIncomingSync(data as SyncState);
