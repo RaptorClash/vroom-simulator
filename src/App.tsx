@@ -22,11 +22,8 @@ const getStr = (k: string, d: string) => { try { const v = localStorage.getItem(
 export default function App() {
   const [hasInteracted, setHasInteracted] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-
   const [isClientRole, setIsClientRole] = useState(false);
-
   const [driverSide, setDriverSide] = useState<'left' | 'right'>(() => getStr('vr_side', 'right') as 'left' | 'right');
-
   const [packId, setPackId] = useState(() => getStr('vr_pack', soundPacks[0]?.id || ''));
   const [masterVol, setMasterVol] = useState(() => getNum('vr_mvol', 100));
   const [engineVol, setEngineVol] = useState(() => getNum('vr_evol', 50));
@@ -34,15 +31,12 @@ export default function App() {
   const [maxSpd, setMaxSpd] = useState(() => getNum('vr_spd', 300));
   const [gears, setGears] = useState(() => getNum('vr_grs', 6));
   const [shiftPt, setShiftPt] = useState(() => getNum('vr_shft', 1.0));
-
   const [mode, setMode] = useState<'gps' | 'manual' | 'sensor' | 'solo'>('gps');
   const [gpsSpeed, setGpsSpeed] = useState(0);
   const [gpsError, setGpsError] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [isRestarting, setIsRestarting] = useState(false);
-
   const [syncedSpeed, setSyncedSpeed] = useState<number | null>(null);
-
   const [turnUrl, setTurnUrl] = useState(() => {
     try {
       const p = new URLSearchParams(window.location.search);
@@ -50,7 +44,6 @@ export default function App() {
     } catch (e) { console.error("URL Parameter Fehler", e); }
     return getStr('vr_turn_url', '');
   });
-
   const [turnUser, setTurnUser] = useState(() => {
     try {
       const p = new URLSearchParams(window.location.search);
@@ -58,7 +51,6 @@ export default function App() {
     } catch (e) { console.error("URL Parameter Fehler", e); }
     return getStr('vr_turn_user', '');
   });
-
   const [turnPass, setTurnPass] = useState(() => {
     try {
       const p = new URLSearchParams(window.location.search);
@@ -66,15 +58,12 @@ export default function App() {
     } catch (e) { console.error("URL Parameter Fehler", e); }
     return getStr('vr_turn_pass', '');
   });
-
   const [spotifyClientId, setSpotifyClientId] = useState(() => getStr('spotify_client_id', ''));
-
+  const isReceivingSync = useRef(false);
   const sensor = useMotionSensor();
-
   const { engineStarted, speed, targetLoad, setTargetLoad, startEngine, stopEngine } = useEngine(
     packId, isClientRole ? 0 : (masterVol / 100) * engineVol, maxSpd, gears, shiftPt, mode === 'solo' ? 'sensor' : mode, gpsSpeed
   );
-
   const restartEngineSmoothly = () => {
     if (engineStarted) { stopEngine(); setIsRestarting(true); }
   };
@@ -85,8 +74,9 @@ export default function App() {
       return () => clearTimeout(timer);
     }
   }, [isRestarting, packId, startEngine]);
-
   const handleIncomingSync = (state: SyncState) => {
+    isReceivingSync.current = true;
+
     if (state.targetLoad !== undefined) setTargetLoad(state.targetLoad);
     if (state.masterVol !== undefined) setMasterVol(state.masterVol);
     if (state.engineVol !== undefined) setEngineVol(state.engineVol);
@@ -94,7 +84,6 @@ export default function App() {
     if (state.maxSpeed !== undefined) setMaxSpd(state.maxSpeed);
     if (state.gears !== undefined) setGears(state.gears);
     if (state.shiftPoint !== undefined) setShiftPt(state.shiftPoint);
-
     if (state.turnUrl !== undefined) setTurnUrl(state.turnUrl);
     if (state.turnUser !== undefined) setTurnUser(state.turnUser);
     if (state.turnPass !== undefined) setTurnPass(state.turnPass);
@@ -103,22 +92,31 @@ export default function App() {
     if (state.engineStarted !== undefined && state.engineStarted !== engineStarted) {
       if (state.engineStarted) startEngine(); else stopEngine();
     }
-
     if (state.isPaused !== undefined && state.isPaused !== sensor.isPaused) {
       sensor.togglePause();
     }
-
     if (state.syncedSpeed !== undefined) {
       setSyncedSpeed(state.syncedSpeed);
     }
-
     if (state.packId !== undefined && state.packId !== packId) {
       setPackId(state.packId);
       restartEngineSmoothly();
     }
+    if (state.doCalibrate !== undefined) {
+      sensor.calibrate();
+    }
+
+    setTimeout(() => { isReceivingSync.current = false; }, 50);
   };
 
   const peer = usePeer(handleIncomingSync);
+
+  const handleCalibrate = () => {
+    sensor.calibrate();
+    if (peer.connected) {
+      peer.broadcastState({ doCalibrate: Date.now() });
+    }
+  };
 
   useEffect(() => {
     localStorage.setItem('vr_pack', packId);
@@ -134,7 +132,7 @@ export default function App() {
     localStorage.setItem('vr_side', driverSide);
     if (spotifyClientId) localStorage.setItem('spotify_client_id', spotifyClientId);
 
-    if (peer.connected) {
+    if (peer.connected && !isReceivingSync.current) {
       peer.broadcastState({
         packId, masterVol, engineVol, spotifyVol: spotVol, maxSpeed: maxSpd,
         gears, shiftPoint: shiftPt, turnUrl, turnUser, turnPass, spotifyClientId
@@ -143,12 +141,14 @@ export default function App() {
   }, [packId, masterVol, engineVol, spotVol, maxSpd, gears, shiftPt, turnUrl, turnUser, turnPass, spotifyClientId, driverSide, peer]);
 
   useEffect(() => {
-    if (peer.connected) {
-      if (mode === 'sensor') peer.broadcastState({ targetLoad: sensor.load, isPaused: sensor.isPaused });
+    if (peer.connected && !isReceivingSync.current) {
+      peer.broadcastState({
+        targetLoad: mode === 'sensor' ? sensor.load : targetLoad,
+        isPaused: sensor.isPaused
+      });
     }
     if (mode === 'solo' && engineStarted) setTargetLoad(sensor.load);
-  }, [sensor.load, sensor.isPaused, mode, peer, engineStarted, setTargetLoad]);
-
+  }, [sensor.load, targetLoad, sensor.isPaused, mode, peer, engineStarted, setTargetLoad]);
 
   useEffect(() => {
     if ((mode !== 'gps' && mode !== 'sensor' && mode !== 'solo') || !engineStarted) {
@@ -344,7 +344,7 @@ export default function App() {
                       <Button variant="contained" color="primary" size="large" fullWidth onClick={sensor.requestAccess}>Sensoren aktivieren</Button>
                     ) : (
                       <Stack direction="row" spacing={2} sx={{ width: '100%' }}>
-                        <Button fullWidth variant="outlined" color="inherit" onClick={sensor.calibrate} startIcon={<FaArrowsToEye />}>Kalibrieren</Button>
+                        <Button fullWidth variant="outlined" color="inherit" onClick={handleCalibrate} startIcon={<FaArrowsToEye />}>Kalibrieren</Button>
                         <Button fullWidth variant={sensor.isPaused ? "contained" : "outlined"} color={sensor.isPaused ? "primary" : "inherit"} onClick={sensor.togglePause} startIcon={sensor.isPaused ? <FaPlay /> : <FaPause />}>
                           {sensor.isPaused ? "Fortsetzen" : "Pausieren"}
                         </Button>
@@ -388,6 +388,7 @@ export default function App() {
             turnUser={turnUser} setTurnUser={setTurnUser}
             turnPass={turnPass} setTurnPass={setTurnPass}
             driverSide={driverSide} setDriverSide={setDriverSide}
+            isClientRole={isClientRole}
           />
         </Box>
       )}

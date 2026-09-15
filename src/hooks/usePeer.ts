@@ -3,21 +3,22 @@ import { Peer } from 'peerjs';
 import type { DataConnection } from 'peerjs';
 
 export interface SyncState {
-    targetLoad?: number;
-    masterVol?: number;
-    engineVol?: number;
-    spotifyVol?: number;
-    maxSpeed?: number;
-    gears?: number;
-    shiftPoint?: number;
-    packId?: string;
-    syncedSpeed?: number;
-    isPaused?: boolean;
-    engineStarted?: boolean;
-    turnUrl?: string;
-    turnUser?: string;
-    turnPass?: string;
-    spotifyClientId?: string;
+  targetLoad?: number;
+  isPaused?: boolean;
+  masterVol?: number;
+  engineVol?: number;
+  spotifyVol?: number;
+  maxSpeed?: number;
+  gears?: number;
+  shiftPoint?: number;
+  turnUrl?: string;
+  turnUser?: string;
+  turnPass?: string;
+  spotifyClientId?: string;
+  engineStarted?: boolean;
+  syncedSpeed?: number;
+  packId?: string;
+  doCalibrate?: number;
 }
 
 export function usePeer(onIncomingSync: (state: SyncState) => void) {

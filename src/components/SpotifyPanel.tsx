@@ -67,9 +67,10 @@ const base64encode = (input: ArrayBuffer) => {
 
 interface SpotifyPanelProps {
     volume: number;
+    isClientRole: boolean;
 }
 
-export function SpotifyPanel({ volume }: SpotifyPanelProps) {
+export function SpotifyPanel({ volume, isClientRole }: SpotifyPanelProps) {
     const [clientId, setClientId] = useState<string>(() => window.localStorage.getItem("spotify_client_id") || "");
     const [inputClientId, setInputClientId] = useState<string>("");
     const [token, setToken] = useState<string | null>(() => window.localStorage.getItem("spotify_token"));
@@ -182,7 +183,7 @@ export function SpotifyPanel({ volume }: SpotifyPanelProps) {
             const spotifyPlayer = new window.Spotify.Player({
                 name: 'Vroom Simulator Web Player',
                 getOAuthToken: (cb) => { cb(token); },
-                volume: volume
+                volume: isClientRole ? 0 : volume
             });
 
             playerRef.current = spotifyPlayer;
@@ -220,9 +221,9 @@ export function SpotifyPanel({ volume }: SpotifyPanelProps) {
 
     useEffect(() => {
         if (playerRef.current) {
-            playerRef.current.setVolume(volume);
+            playerRef.current.setVolume(isClientRole ? 0 : volume);
         }
-    }, [volume]);
+    }, [volume, isClientRole]);
 
     const handleSaveClientId = () => {
         if (inputClientId.trim()) {
@@ -339,7 +340,6 @@ export function SpotifyPanel({ volume }: SpotifyPanelProps) {
                 </Box>
             ) : (
                 <Box>
-                    {/* PLAYER UI */}
                     <Box sx={{ mb: 2, p: 2, bgcolor: 'rgba(29, 185, 84, 0.1)', borderRadius: 2, border: '1px solid rgba(29, 185, 84, 0.2)' }}>
                         {currentTrack ? (
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
@@ -373,7 +373,6 @@ export function SpotifyPanel({ volume }: SpotifyPanelProps) {
 
                     {error && <Alert severity="error" sx={{ mb: 2, fontSize: '0.75rem', wordBreak: 'break-word' }}>{error}</Alert>}
 
-                    {/* PLAYLIST BEREICH */}
                     <Box sx={{ bgcolor: 'rgba(255,255,255,0.03)', borderRadius: 2, overflow: 'hidden' }}>
                         <Box sx={{ display: 'flex', flexDirection: 'column', height: 280 }}>
                             <Box sx={{ p: 1.5, borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between' }}>

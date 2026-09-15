@@ -30,13 +30,15 @@ interface SettingsDrawerProps {
     setTurnPass: (val: string) => void;
     driverSide: 'left' | 'right';
     setDriverSide: (val: 'left' | 'right') => void;
+    isClientRole: boolean;
 }
 
 export function SettingsDrawer({
     open, onClose, packId, handlePackChange, masterVol, setMasterVol,
     engineVol, setEngineVol, spotVol, setSpotVol, maxSpd, setMaxSpd,
     gears, setGears, shiftPt, setShiftPt, turnUrl, setTurnUrl,
-    turnUser, setTurnUser, turnPass, setTurnPass, driverSide, setDriverSide
+    turnUser, setTurnUser, turnPass, setTurnPass, driverSide, setDriverSide,
+    isClientRole
 }: SettingsDrawerProps) {
 
     const [shareOpen, setShareOpen] = useState(false);
@@ -144,7 +146,7 @@ export function SettingsDrawer({
 
                     <Divider />
 
-                    <SpotifyPanel volume={(masterVol / 100) * (spotVol / 100)} />
+                    <SpotifyPanel volume={(masterVol / 100) * (spotVol / 100)} isClientRole={isClientRole} />
 
                     <Button
                         variant="contained"
