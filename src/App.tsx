@@ -53,7 +53,7 @@ export default function App() {
   const syncLockTimer = useRef<number | null>(null);
 
   const sensor = useMotionSensor();
-  const { engineStarted, speed, targetLoad, setTargetLoad, startEngine, stopEngine } = useEngine(
+  const { engineStarted, speed, targetLoad, setTargetLoad, startEngine, stopEngine, rpmRatio } = useEngine(
     packId, isClientRole ? 0 : (masterVol / 100) * engineVol, maxSpd, gears, shiftPt, mode === 'solo' ? 'sensor' : mode, gpsSpeed
   );
 
@@ -263,9 +263,6 @@ export default function App() {
   const gearSpeedRange = maxSpd / gears;
   const currentGear = Math.min(gears, Math.max(1, Math.ceil(absSpeed / gearSpeedRange)));
 
-  const speedInGear = absSpeed - (gearSpeedRange * (currentGear - 1));
-  const rpmRatio = Math.max(0, Math.min(1, speedInGear / gearSpeedRange));
-
   const displayRpm = Math.round(800 + rpmRatio * 6200);
 
   return (
@@ -413,9 +410,9 @@ export default function App() {
                     {displayRpm} RPM (GANG {currentGear})
                   </Typography>
                 </Stack>
-                <LinearProgress variant="determinate" value={Math.max(0, Math.min(100, targetLoad * 100))} sx={{ height: 8, borderRadius: 4 }} />
-                {targetLoad < 0 && <Typography color="error" variant="caption" sx={{ display: 'block', mt: 1 }}>Bremsend ({Math.round(targetLoad * -100)}%)</Typography>}
-              </Box>
+                <LinearProgress variant="determinate" value={Math.max(0, Math.min(100, rpmRatio * 100)) || 0} sx={{ height: 8, borderRadius: 4 }} />
+
+                {targetLoad < 0 && <Typography color="error" variant="caption" sx={{ display: 'block', mt: 1 }}>Bremsend ({Math.round(targetLoad * -100)}%)</Typography>}              </Box>
             )}
           </Box>
 

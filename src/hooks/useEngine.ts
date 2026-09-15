@@ -15,6 +15,8 @@ export function useEngine(
     const [engineStarted, setEngineStarted] = useState(false);
     const [speed, setSpeed] = useState(0);
     const [targetLoad, setTargetLoad] = useState(0);
+    const [rpm, setRpm] = useState(0);
+    const [rpmRatio, setRpmRatio] = useState(0);
 
     const currentLoadRef = useRef(0);
     const speedRef = useRef(0);
@@ -252,7 +254,8 @@ export function useEngine(
             }
 
             const currentRpm = rpmRef.current;
-
+            setRpm(Math.round(currentRpm));
+            setRpmRatio(Math.max(0, Math.min(1, (currentRpm - idleRPM) / (effectiveMaxRPM - idleRPM))));
 
             if (prevLoad > 0.5 && targetLoad <= 0 && currentRpm > effectiveMaxRPM * 0.6) {
                 playBlowoffSound(activePack, ctx);
@@ -337,5 +340,5 @@ export function useEngine(
         return () => clearInterval(interval);
     }, [engineStarted, targetLoad, maxSpeed, uiGears, uiShiftPoint, selectedPackId, mode, gpsSpeed]);
 
-    return { engineStarted, speed, targetLoad, setTargetLoad, startEngine, stopEngine };
+    return { engineStarted, speed, targetLoad, setTargetLoad, startEngine, stopEngine, rpm, rpmRatio };
 }
