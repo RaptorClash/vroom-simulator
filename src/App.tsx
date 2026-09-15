@@ -271,14 +271,25 @@ export default function App() {
         <Box sx={{ height: '100vh', width: '100vw', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <audio src="/silence.mp3" loop autoPlay playsInline style={{ display: 'none' }} />
 
-          <Box sx={{ display: 'flex', justifyContent: 'center', p: 3, position: 'relative' }}>
-            <Box sx={{
-              position: 'absolute',
-              left: driverSide === 'left' ? 24 : 'auto',
-              right: driverSide === 'right' ? 24 : 'auto',
-              display: 'flex', gap: 2
-            }}>
-              <IconButton onClick={() => setSettingsOpen(true)} sx={{ bgcolor: 'background.paper', border: '1px solid rgba(255,255,255,0.1)' }}><FaGear /></IconButton>
+          <Box sx={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            p: 2,
+            px: { xs: 2, sm: 4 },
+            flexDirection: driverSide === 'left' ? 'row-reverse' : 'row'
+          }}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 900, letterSpacing: 3, color: 'text.secondary', opacity: 0.5 }}>
+              VROOM
+            </Typography>
+
+            <Stack direction="row" spacing={2}>
+              <IconButton
+                onClick={() => setSettingsOpen(true)}
+                sx={{ bgcolor: 'background.paper', border: '1px solid rgba(255,255,255,0.1)' }}
+              >
+                <FaGear />
+              </IconButton>
 
               <IconButton
                 onClick={toggleEngine}
@@ -290,12 +301,31 @@ export default function App() {
               >
                 <FaPowerOff />
               </IconButton>
-            </Box>
+            </Stack>
+          </Box>
 
-            <ToggleButtonGroup color="primary" value={mode} exclusive onChange={(_, m) => m && setMode(m)} size="small" sx={{ bgcolor: 'background.paper', borderRadius: 20 }}>
-              <ToggleButton value="gps"><FaCar style={{ marginRight: 8 }} /> AUTO</ToggleButton>
+          <Box sx={{ px: { xs: 2, sm: 4 }, pb: 2, display: 'flex', justifyContent: 'center' }}>
+            <ToggleButtonGroup
+              color="primary"
+              value={mode}
+              exclusive
+              onChange={(_, m) => m && setMode(m)}
+              size="small"
+              fullWidth
+              sx={{
+                bgcolor: 'background.paper',
+                borderRadius: 2,
+                maxWidth: 600,
+                '& .MuiToggleButton-root': {
+                  py: 1,
+                  fontSize: { xs: '0.7rem', sm: '0.875rem' },
+                  whiteSpace: 'nowrap'
+                }
+              }}
+            >
+              <ToggleButton value="gps"><FaCar style={{ marginRight: 6 }} /> AUTO</ToggleButton>
               <ToggleButton value="manual">MANUAL</ToggleButton>
-              <ToggleButton value="sensor"><FaMobileScreen style={{ marginRight: 8 }} /> SENSOR</ToggleButton>
+              <ToggleButton value="sensor"><FaMobileScreen style={{ marginRight: 6 }} /> SENSOR</ToggleButton>
               <ToggleButton value="solo">SOLO</ToggleButton>
             </ToggleButtonGroup>
           </Box>

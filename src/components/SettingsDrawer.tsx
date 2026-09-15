@@ -85,8 +85,12 @@ export function SettingsDrawer({
 
     return (
         <>
-            <Drawer anchor={driverSide} open={open} onClose={onClose}>
-                <Box sx={{ width: { xs: '100vw', sm: 450 }, p: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <Drawer
+                anchor={driverSide}
+                open={open}
+                onClose={onClose}
+                ModalProps={{ keepMounted: true }}
+            >                <Box sx={{ width: { xs: '100vw', sm: 450 }, p: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
 
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Typography variant="h5" sx={{ fontWeight: 'bold' }}>Einstellungen</Typography>
