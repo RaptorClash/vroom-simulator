@@ -39,7 +39,7 @@ export default function App() {
   const [syncedSpeed, setSyncedSpeed] = useState<number | null>(null);
   const [syncedRpm, setSyncedRpm] = useState<number | null>(null);
   const [syncedRpmRatio, setSyncedRpmRatio] = useState<number | null>(null);
-
+  const [currentGear, setCurrentGear] = useState(1);
   const [turnUrl, setTurnUrl] = useState(() => {
     try { const p = new URLSearchParams(window.location.search); if (p.has('turn')) return atob(p.get('turn')!); } catch (e) { console.error(e); } return getStr('vr_turn_url', '');
   });
@@ -56,7 +56,7 @@ export default function App() {
 
   const sensor = useMotionSensor();
   const { engineStarted, speed, targetLoad, setTargetLoad, startEngine, stopEngine, rpm, rpmRatio } = useEngine(
-    packId, isClientRole ? 0 : (masterVol / 100) * engineVol, maxSpd, gears, shiftPt, mode === 'solo' ? 'sensor' : mode, gpsSpeed
+    packId, isClientRole ? 0 : (masterVol / 100) * engineVol, maxSpd, gears, shiftPt, mode === 'solo' ? 'sensor' : mode, gpsSpeed, currentGear
   );
 
   const stateRefs = useRef({ engineStarted, packId, isPaused: sensor.isPaused });
@@ -109,6 +109,7 @@ export default function App() {
     if (state.doCalibrate !== undefined) {
       sensor.calibrate();
     }
+    if (state.currentGear !== undefined) setCurrentGear(state.currentGear);
 
     syncLockTimer.current = window.setTimeout(() => { isReceivingSync.current = false; }, 50);
   };
@@ -139,10 +140,10 @@ export default function App() {
     if (peer.connected && !isReceivingSync.current) {
       peer.broadcastState({
         packId, masterVol, engineVol, spotifyVol: spotVol, maxSpeed: maxSpd,
-        gears, shiftPoint: shiftPt, turnUrl, turnUser, turnPass, spotifyClientId
+        gears, shiftPoint: shiftPt, turnUrl, turnUser, turnPass, spotifyClientId, currentGear
       });
     }
-  }, [packId, masterVol, engineVol, spotVol, maxSpd, gears, shiftPt, turnUrl, turnUser, turnPass, spotifyClientId, driverSide, peer]);
+  }, [packId, masterVol, engineVol, spotVol, maxSpd, gears, shiftPt, turnUrl, turnUser, turnPass, spotifyClientId, driverSide, currentGear, peer]);
 
   useEffect(() => {
     if (mode === 'solo' || (mode === 'sensor' && isClientRole)) {
@@ -279,12 +280,25 @@ export default function App() {
 
   const finalDisplaySpeed = (isClientRole && syncedSpeed !== null) ? syncedSpeed : localDisplaySpeed;
 
-  const absSpeed = Math.abs(finalDisplaySpeed);
-  const gearSpeedRange = maxSpd / gears;
-  const currentGear = Math.min(gears, Math.max(1, Math.ceil(absSpeed / gearSpeedRange)));
-
   const displayRpm = (isClientRole && syncedRpm !== null) ? syncedRpm : rpm;
   const displayRpmRatio = (isClientRole && syncedRpmRatio !== null) ? syncedRpmRatio : rpmRatio;
+
+  const shiftUp = () => {
+    if (currentGear < gears) {
+      const newGear = currentGear + 1;
+      setCurrentGear(newGear);
+      if (peer.connected) peer.broadcastState({ currentGear: newGear });
+    }
+  };
+
+  const shiftDown = () => {
+    if (currentGear > 1) {
+      const newGear = currentGear - 1;
+      setCurrentGear(newGear);
+      if (peer.connected) peer.broadcastState({ currentGear: newGear });
+    }
+  };
+
   return (
     <ThemeProvider theme={darkTheme}>
       <CssBaseline />
@@ -417,9 +431,30 @@ export default function App() {
             )}
           </Box>
 
-          <Box sx={{ p: { xs: 2, sm: 4 }, display: 'flex', justifyContent: 'center', minHeight: '120px', pb: { xs: 4, sm: 4 } }}>
+          <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+            <Dashboard speed={finalDisplaySpeed} onStop={toggleEngine} />
+            {(mode === 'gps' || mode === 'sensor') && gpsError && (
+              <Typography color="error" variant="body2" sx={{ mt: 2 }}>{gpsError}</Typography>
+            )}
+          </Box>
+
+          <Box sx={{ p: { xs: 2, sm: 4 }, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '120px', pb: { xs: 4, sm: 4 } }}>
+
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, mb: 3, width: '100%', maxWidth: 300 }}>
+              <Button variant="outlined" size="large" onClick={shiftDown} disabled={currentGear <= 1} sx={{ fontSize: '1.5rem', minWidth: '64px', borderRadius: 3 }}>-</Button>
+              <Typography variant="h4" sx={{ fontWeight: 'bold', minWidth: '100px', textAlign: 'center', color: 'primary.main' }}>
+                G {currentGear}
+              </Typography>
+              <Button variant="outlined" size="large" onClick={shiftUp} disabled={currentGear >= gears} sx={{ fontSize: '1.5rem', minWidth: '64px', borderRadius: 3 }}>+</Button>
+            </Box>
+
             {mode === 'manual' ? (
-              <Controls targetLoad={targetLoad} setTargetLoad={setTargetLoad} />
+              <Box sx={{ width: '100%', maxWidth: 600, textAlign: 'center' }}>
+                <Typography variant="overline" color="primary" sx={{ lineHeight: 1, fontWeight: 'bold', display: 'block', mb: 1 }}>
+                  {displayRpm || 0} RPM
+                </Typography>
+                <Controls targetLoad={targetLoad} setTargetLoad={setTargetLoad} />
+              </Box>
             ) : (
               <Box sx={{ width: '100%', maxWidth: 600, textAlign: 'center' }}>
                 <Stack sx={{ mb: 1, px: 1 }}>
@@ -427,12 +462,14 @@ export default function App() {
                     THROTTLE / LOAD
                   </Typography>
                   <Typography variant="overline" color="primary" sx={{ lineHeight: 1, fontWeight: 'bold' }}>
-                    {displayRpm || 0} RPM (GANG {currentGear})
+                    {displayRpm || 0} RPM
                   </Typography>
                 </Stack>
                 <LinearProgress variant="determinate" value={Math.max(0, Math.min(100, (displayRpmRatio || 0) * 100))} sx={{ height: 8, borderRadius: 4 }} />
-                {targetLoad < 0 && <Typography color="error" variant="caption" sx={{ display: 'block', mt: 1 }}>Bremsend ({Math.round(targetLoad * -100)}%)</Typography>}              </Box>
+                {targetLoad < 0 && <Typography color="error" variant="caption" sx={{ display: 'block', mt: 1 }}>Bremsend ({Math.round(targetLoad * -100)}%)</Typography>}
+              </Box>
             )}
+
           </Box>
 
           <SettingsDrawer

@@ -10,7 +10,8 @@ export function useEngine(
     uiGears: number,
     uiShiftPoint: number,
     mode: 'gps' | 'manual' | 'sensor' | 'solo' = 'manual',
-    gpsSpeed: number = 0
+    gpsSpeed: number = 0,
+    manualGear: number = 1
 ) {
     const [engineStarted, setEngineStarted] = useState(false);
     const [speed, setSpeed] = useState(0);
@@ -231,10 +232,13 @@ export function useEngine(
                 let targetGearRpm: number;
                 if (uiGears > 1) {
                     const speedPerGear = maxSpeed / uiGears;
-                    const currentGear = Math.min(Math.floor(newSpeed / speedPerGear), uiGears - 1);
-                    const speedInCurrentGear = newSpeed - (currentGear * speedPerGear);
-                    const gearProgress = speedInCurrentGear / speedPerGear;
-                    const startRpm = currentGear === 0 ? idleRPM : effectiveMaxRPM * 0.65;
+                    const gearMinSpeed = (manualGear - 1) * speedPerGear;
+                    let speedInCurrentGear = newSpeed - gearMinSpeed;
+                    if (speedInCurrentGear < 0) speedInCurrentGear = 0;
+                    let gearProgress = speedInCurrentGear / speedPerGear;
+                    if (gearProgress > 1.2) gearProgress = 1.2;
+
+                    const startRpm = manualGear === 1 ? idleRPM : effectiveMaxRPM * 0.65;
                     targetGearRpm = startRpm + gearProgress * (effectiveMaxRPM - startRpm);
                 } else {
                     targetGearRpm = idleRPM + (newSpeed / maxSpeed) * (effectiveMaxRPM - idleRPM);

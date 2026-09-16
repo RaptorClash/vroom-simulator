@@ -3,24 +3,25 @@ import { Peer } from 'peerjs';
 import type { DataConnection } from 'peerjs';
 
 export interface SyncState {
-  targetLoad?: number;
-  isPaused?: boolean;
-  masterVol?: number;
-  engineVol?: number;
-  spotifyVol?: number;
-  maxSpeed?: number;
-  gears?: number;
-  shiftPoint?: number;
-  turnUrl?: string;
-  turnUser?: string;
-  turnPass?: string;
-  spotifyClientId?: string;
-  engineStarted?: boolean;
-  syncedSpeed?: number;
-  packId?: string;
-  doCalibrate?: number;
-  rpm?: number;
-  rpmRatio?: number;
+    targetLoad?: number;
+    isPaused?: boolean;
+    masterVol?: number;
+    engineVol?: number;
+    spotifyVol?: number;
+    maxSpeed?: number;
+    gears?: number;
+    shiftPoint?: number;
+    turnUrl?: string;
+    turnUser?: string;
+    turnPass?: string;
+    spotifyClientId?: string;
+    engineStarted?: boolean;
+    syncedSpeed?: number;
+    packId?: string;
+    doCalibrate?: number;
+    rpm?: number;
+    rpmRatio?: number;
+    currentGear?: number;
 }
 
 export function usePeer(onIncomingSync: (state: SyncState) => void) {
