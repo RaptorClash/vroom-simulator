@@ -223,10 +223,10 @@ export default function App() {
   }, [packId, masterVol, engineVol, spotVol, maxSpd, gears, shiftPt, turnUrl, turnUser, turnPass, spotifyClientId, driverSide, currentGear, isAutoShift, peer]);
 
   useEffect(() => {
-    if (mode === 'solo' || (mode === 'sensor' && isClientRole)) {
+    if (mode === 'solo' || (mode === 'sensor' && isClientRole) || (mode === 'gps' && sensor.hasPermission)) {
       setTargetLoad(sensor.load);
     }
-  }, [sensor.load, mode, isClientRole, setTargetLoad]);
+  }, [sensor.load, mode, isClientRole, setTargetLoad, sensor.hasPermission]);
 
   useEffect(() => {
     if (peer.connected && isClientRole && !isReceivingSync.current) {
@@ -251,22 +251,28 @@ export default function App() {
         if (speedBuffer.length > 3) speedBuffer.shift();
         const currentSpeedKmh = speedBuffer.reduce((a, b) => a + b, 0) / speedBuffer.length;
         setGpsSpeed(currentSpeedKmh);
+
         if (mode === 'gps') {
           const now = Date.now();
           const dt = (now - lastTime) / 1000;
           if (dt >= 0.5) {
-            const acceleration = (currentSpeedKmh - lastSpeedKmh) / dt;
-            const newLoad = acceleration <= 0.1 ? 0.0 : acceleration > 2.0 ? 1.0 : acceleration > 0.5 ? 0.6 : 0.25;
-            setTargetLoad(newLoad);
+            if (!sensor.hasPermission) {
+              const acceleration = (currentSpeedKmh - lastSpeedKmh) / dt;
+              const newLoad = acceleration <= 0.1 ? 0.0 : acceleration > 2.0 ? 1.0 : acceleration > 0.5 ? 0.6 : 0.25;
+              setTargetLoad(newLoad);
+            }
             lastSpeedKmh = currentSpeedKmh; lastTime = now;
           }
         }
       },
-      () => { setGpsError("GPS Signal konnte nicht abgerufen werden."); if (mode === 'gps') setTargetLoad(0); },
+      () => {
+        setGpsError("GPS Signal konnte nicht abgerufen werden.");
+        if (mode === 'gps' && !sensor.hasPermission) setTargetLoad(0);
+      },
       { enableHighAccuracy: true, maximumAge: 1000 }
     );
     return () => navigator.geolocation.clearWatch(watchId);
-  }, [mode, engineStarted, setTargetLoad]);
+  }, [mode, engineStarted, setTargetLoad, sensor.hasPermission]);
 
   const speedRef = useRef(localTrueSpeed);
   const rpmStateRef = useRef({ rpm: 0, rpmRatio: 0 });
@@ -381,12 +387,12 @@ export default function App() {
     </Box>
   );
 
-  const sensorControlsUI = (mode === 'solo' || (mode === 'sensor' && peer.connected)) && (
-    <Stack direction="column" spacing={2} sx={{ width: '100%', alignItems: 'center', mt: 2 }}>
+  const sensorControlsUI = (
+    <Stack direction="column" spacing={2} sx={{ width: '100%', alignItems: 'center' }}>
       {mode === 'sensor' && <Typography color="success.main" sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}><FaLink /> Erfolgreich verbunden</Typography>}
 
-      {(!sensor.hasPermission && (mode === 'solo' || isClientRole)) ? (
-        <Button variant="contained" color="primary" size="large" fullWidth onClick={sensor.requestAccess}>Sensoren aktivieren</Button>
+      {!sensor.hasPermission ? (
+        <Button variant="contained" color="primary" size="large" fullWidth onClick={sensor.requestAccess}>Sensoren für G-Kräfte aktivieren</Button>
       ) : (
         <Stack direction="row" spacing={2} sx={{ width: '100%' }}>
           <Button fullWidth variant="outlined" color="inherit" onClick={handleCalibrate} startIcon={<FaArrowsToEye />}>Kalibrieren</Button>
@@ -397,7 +403,6 @@ export default function App() {
       )}
     </Stack>
   );
-
 
   return (
     <ThemeProvider theme={darkTheme}>
@@ -425,7 +430,7 @@ export default function App() {
                 VROOM
               </Typography>
 
-              {(isClientRole || mode === 'sensor' || mode === 'solo') && (
+              {(isClientRole || mode === 'sensor' || mode === 'solo' || mode === 'gps') && (
                 <ToggleButtonGroup
                   size="small"
                   value={remoteViewActive ? 'remote' : 'cockpit'}
@@ -487,7 +492,11 @@ export default function App() {
 
               {gearControlsUI}
 
-              {sensorControlsUI}
+              {(mode === 'solo' || mode === 'gps' || (mode === 'sensor' && peer.connected)) && (
+                <Paper sx={{ p: 3, bgcolor: 'background.paper', borderRadius: 3, width: '100%' }}>
+                  {sensorControlsUI}
+                </Paper>
+              )}
 
               <Paper sx={{ p: 3, bgcolor: 'background.paper', borderRadius: 3, mt: 1 }}>
                 <Typography variant="overline" color="text.secondary" sx={{ mb: 2, display: 'block' }}>Audio Mixer</Typography>
@@ -542,39 +551,43 @@ export default function App() {
                 </ToggleButtonGroup>
               </Box>
 
-              {(mode === 'sensor' || mode === 'solo') && (
+              {mode === 'sensor' && !peer.connected && (
                 <Box sx={{ display: 'flex', justifyContent: 'center', px: 3, mt: 2 }}>
                   <Paper elevation={0} sx={{ p: 3, borderRadius: 4, bgcolor: 'background.paper', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, maxWidth: 500, width: '100%' }}>
-
-                    {mode === 'sensor' && !peer.connected && (
-                      <Stack direction="column" spacing={3} sx={{ width: '100%', alignItems: 'center' }}>
-                        {peer.peerId ? (
-                          <Box sx={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                            <Box>
-                              <Typography variant="overline" color="text.secondary">DEIN HOST-PIN</Typography>
-                              <Typography variant="h3" color="primary" sx={{ letterSpacing: 8, fontWeight: 'bold' }}>{peer.peerId}</Typography>
-                            </Box>
-
-                            <Box sx={{ p: 2, bgcolor: '#ffffff', borderRadius: 2 }}>
-                              <QRCodeSVG
-                                value={`${window.location.origin}${window.location.pathname}?pin=${peer.peerId}`}
-                                size={160}
-                              />
-                            </Box>
-                            <Typography variant="caption" color="text.secondary">
-                              Mit dem Handy scannen zum automatischen Verbinden
-                            </Typography>
+                    <Stack direction="column" spacing={3} sx={{ width: '100%', alignItems: 'center' }}>
+                      {peer.peerId ? (
+                        <Box sx={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                          <Box>
+                            <Typography variant="overline" color="text.secondary">DEIN HOST-PIN</Typography>
+                            <Typography variant="h3" color="primary" sx={{ letterSpacing: 8, fontWeight: 'bold' }}>{peer.peerId}</Typography>
                           </Box>
-                        ) : (
-                          <Button variant="outlined" size="large" onClick={peer.hostServer} sx={{ width: '100%' }}>Als Auto (Host) starten</Button>
-                        )}
-                        <Divider sx={{ width: '100%' }}>ODER</Divider>
-                        <Stack direction="row" spacing={1} sx={{ width: '100%' }}>
-                          <TextField fullWidth size="small" placeholder="Handy-PIN eingeben" value={joinCode} onChange={e => setJoinCode(e.target.value.replace(/\D/g, '').slice(0, 4))} />
-                          <Button variant="contained" disabled={joinCode.length < 4} onClick={() => { setIsClientRole(true); peer.connectToServer(joinCode); }}>Verbinden</Button>
-                        </Stack>
+
+                          <Box sx={{ p: 2, bgcolor: '#ffffff', borderRadius: 2 }}>
+                            <QRCodeSVG
+                              value={`${window.location.origin}${window.location.pathname}?pin=${peer.peerId}`}
+                              size={160}
+                            />
+                          </Box>
+                          <Typography variant="caption" color="text.secondary">
+                            Mit dem Handy scannen zum automatischen Verbinden
+                          </Typography>
+                        </Box>
+                      ) : (
+                        <Button variant="outlined" size="large" onClick={peer.hostServer} sx={{ width: '100%' }}>Als Auto (Host) starten</Button>
+                      )}
+                      <Divider sx={{ width: '100%' }}>ODER</Divider>
+                      <Stack direction="row" spacing={1} sx={{ width: '100%' }}>
+                        <TextField fullWidth size="small" placeholder="Handy-PIN eingeben" value={joinCode} onChange={e => setJoinCode(e.target.value.replace(/\D/g, '').slice(0, 4))} />
+                        <Button variant="contained" disabled={joinCode.length < 4} onClick={() => { setIsClientRole(true); peer.connectToServer(joinCode); }}>Verbinden</Button>
                       </Stack>
-                    )}
+                    </Stack>
+                  </Paper>
+                </Box>
+              )}
+
+              {(mode === 'solo' || mode === 'gps' || (mode === 'sensor' && peer.connected)) && (
+                <Box sx={{ display: 'flex', justifyContent: 'center', px: 3, mt: 2 }}>
+                  <Paper elevation={0} sx={{ p: 3, borderRadius: 4, bgcolor: 'background.paper', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, maxWidth: 500, width: '100%' }}>
                     {sensorControlsUI}
                   </Paper>
                 </Box>
