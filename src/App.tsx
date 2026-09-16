@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { ThemeProvider, createTheme, CssBaseline, Box, Typography, ToggleButtonGroup, ToggleButton, LinearProgress, IconButton, Button, TextField, Stack, Paper, Divider } from '@mui/material';
-import { FaPowerOff, FaGear, FaLink, FaMobileScreen, FaCar, FaPause, FaPlay, FaArrowsToEye } from 'react-icons/fa6';
+import { ThemeProvider, createTheme, CssBaseline, Box, Typography, ToggleButtonGroup, ToggleButton, LinearProgress, IconButton, Button, TextField, Stack, Paper, Divider, Slider } from '@mui/material';
+import { FaPowerOff, FaGear, FaLink, FaMobileScreen, FaCar, FaPause, FaPlay, FaArrowsToEye, FaVolumeHigh, FaMusic, FaGamepad } from 'react-icons/fa6';
 import { QRCodeSVG } from 'qrcode.react';
 import { soundPacks } from './audio/soundManager';
 import { useEngine } from './hooks/useEngine';
@@ -39,7 +39,11 @@ export default function App() {
   const [syncedSpeed, setSyncedSpeed] = useState<number | null>(null);
   const [syncedRpm, setSyncedRpm] = useState<number | null>(null);
   const [syncedRpmRatio, setSyncedRpmRatio] = useState<number | null>(null);
+
   const [currentGear, setCurrentGear] = useState(1);
+  const [isAutoShift, setIsAutoShift] = useState(true);
+
+  const [remoteViewActive, setRemoteViewActive] = useState(false);
   const [turnUrl, setTurnUrl] = useState(() => {
     try { const p = new URLSearchParams(window.location.search); if (p.has('turn')) return atob(p.get('turn')!); } catch (e) { console.error(e); } return getStr('vr_turn_url', '');
   });
@@ -55,8 +59,9 @@ export default function App() {
   const syncLockTimer = useRef<number | null>(null);
 
   const sensor = useMotionSensor();
+
   const { engineStarted, speed, targetLoad, setTargetLoad, startEngine, stopEngine, rpm, rpmRatio } = useEngine(
-    packId, isClientRole ? 0 : (masterVol / 100) * engineVol, maxSpd, gears, shiftPt, mode === 'solo' ? 'sensor' : mode, gpsSpeed, currentGear
+    packId, isClientRole ? 0 : (masterVol / 100) * engineVol, maxSpd, gears, shiftPt, mode === 'solo' ? 'sensor' : mode, gpsSpeed, currentGear, isAutoShift
   );
 
   const stateRefs = useRef({ engineStarted, packId, isPaused: sensor.isPaused });
@@ -74,6 +79,12 @@ export default function App() {
       return () => clearTimeout(timer);
     }
   }, [isRestarting, startEngine]);
+
+  const handleVolumeChange = (type: 'master' | 'engine' | 'spotify', newValue: number) => {
+    if (type === 'master') { setMasterVol(newValue); if (peer.connected) peer.broadcastState({ masterVol: newValue }); }
+    if (type === 'engine') { setEngineVol(newValue); if (peer.connected) peer.broadcastState({ engineVol: newValue }); }
+    if (type === 'spotify') { setSpotVol(newValue); if (peer.connected) peer.broadcastState({ spotifyVol: newValue }); }
+  };
 
   const handleIncomingSync = (state: SyncState) => {
     isReceivingSync.current = true;
@@ -106,10 +117,11 @@ export default function App() {
       setPackId(state.packId);
       restartEngineSmoothly();
     }
+    if (state.currentGear !== undefined) setCurrentGear(state.currentGear);
+    if (state.isAutoShift !== undefined) setIsAutoShift(state.isAutoShift);
     if (state.doCalibrate !== undefined) {
       sensor.calibrate();
     }
-    if (state.currentGear !== undefined) setCurrentGear(state.currentGear);
 
     syncLockTimer.current = window.setTimeout(() => { isReceivingSync.current = false; }, 50);
   };
@@ -140,10 +152,10 @@ export default function App() {
     if (peer.connected && !isReceivingSync.current) {
       peer.broadcastState({
         packId, masterVol, engineVol, spotifyVol: spotVol, maxSpeed: maxSpd,
-        gears, shiftPoint: shiftPt, turnUrl, turnUser, turnPass, spotifyClientId, currentGear
+        gears, shiftPoint: shiftPt, turnUrl, turnUser, turnPass, spotifyClientId, currentGear, isAutoShift
       });
     }
-  }, [packId, masterVol, engineVol, spotVol, maxSpd, gears, shiftPt, turnUrl, turnUser, turnPass, spotifyClientId, driverSide, currentGear, peer]);
+  }, [packId, masterVol, engineVol, spotVol, maxSpd, gears, shiftPt, turnUrl, turnUser, turnPass, spotifyClientId, driverSide, currentGear, isAutoShift, peer]);
 
   useEffect(() => {
     if (mode === 'solo' || (mode === 'sensor' && isClientRole)) {
@@ -159,6 +171,7 @@ export default function App() {
       });
     }
   }, [sensor.load, sensor.isPaused, peer, isClientRole]);
+
   useEffect(() => {
     if ((mode !== 'gps' && mode !== 'sensor' && mode !== 'solo') || !engineStarted) {
       if (mode === 'manual' && engineStarted) setTargetLoad(0);
@@ -191,13 +204,13 @@ export default function App() {
   }, [mode, engineStarted, setTargetLoad]);
 
 
-  const localDisplaySpeed = (mode === 'gps' || mode === 'sensor' || mode === 'solo') ? gpsSpeed : speed;
-  const speedRef = useRef(localDisplaySpeed);
+  const localTrueSpeed = (mode === 'gps' || mode === 'sensor' || mode === 'solo') ? gpsSpeed : speed;
+  const speedRef = useRef(localTrueSpeed);
   const rpmStateRef = useRef({ rpm: 0, rpmRatio: 0 });
 
   useEffect(() => {
-    speedRef.current = localDisplaySpeed;
-  }, [localDisplaySpeed]);
+    speedRef.current = localTrueSpeed;
+  }, [localTrueSpeed]);
 
   useEffect(() => {
     rpmStateRef.current = { rpm, rpmRatio };
@@ -278,26 +291,61 @@ export default function App() {
     restartEngineSmoothly();
   };
 
-  const finalDisplaySpeed = (isClientRole && syncedSpeed !== null) ? syncedSpeed : localDisplaySpeed;
+  const finalDisplaySpeed = (isClientRole && syncedSpeed !== null) ? syncedSpeed : localTrueSpeed;
+  const absSpeed = Math.abs(finalDisplaySpeed);
+  const gearSpeedRange = maxSpd / gears;
+  const autoCalculatedGear = Math.min(gears, Math.max(1, Math.ceil(absSpeed / gearSpeedRange)));
+  const activeGear = isAutoShift ? autoCalculatedGear : currentGear;
 
   const displayRpm = (isClientRole && syncedRpm !== null) ? syncedRpm : rpm;
   const displayRpmRatio = (isClientRole && syncedRpmRatio !== null) ? syncedRpmRatio : rpmRatio;
 
   const shiftUp = () => {
-    if (currentGear < gears) {
-      const newGear = currentGear + 1;
-      setCurrentGear(newGear);
-      if (peer.connected) peer.broadcastState({ currentGear: newGear });
-    }
+    setIsAutoShift(false);
+    const nextGear = Math.min(isAutoShift ? autoCalculatedGear + 1 : currentGear + 1, gears);
+    setCurrentGear(nextGear);
+    if (peer.connected) peer.broadcastState({ currentGear: nextGear, isAutoShift: false });
   };
 
   const shiftDown = () => {
-    if (currentGear > 1) {
-      const newGear = currentGear - 1;
-      setCurrentGear(newGear);
-      if (peer.connected) peer.broadcastState({ currentGear: newGear });
+    setIsAutoShift(false);
+    const nextGear = Math.max(isAutoShift ? autoCalculatedGear - 1 : currentGear - 1, 1);
+    setCurrentGear(nextGear);
+    if (peer.connected) peer.broadcastState({ currentGear: nextGear, isAutoShift: false });
+  };
+
+  const handleAutoShiftToggle = (_: React.MouseEvent<HTMLElement>, val: string | null) => {
+    if (val !== null) {
+      const newAuto = val === 'auto';
+      setIsAutoShift(newAuto);
+      if (newAuto) setCurrentGear(autoCalculatedGear);
+      if (peer.connected) peer.broadcastState({ isAutoShift: newAuto, currentGear: autoCalculatedGear });
     }
   };
+
+  const gearControlsUI = (
+    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: 3, width: '100%', maxWidth: 300, mx: 'auto' }}>
+      <ToggleButtonGroup
+        value={isAutoShift ? 'auto' : 'manual'}
+        exclusive
+        onChange={handleAutoShiftToggle}
+        size="small"
+        sx={{ mb: 2, bgcolor: 'background.paper' }}
+      >
+        <ToggleButton value="auto">Auto-Shift</ToggleButton>
+        <ToggleButton value="manual">Manual</ToggleButton>
+      </ToggleButtonGroup>
+
+      <Paper sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+        <Button variant="outlined" size="large" onClick={shiftDown} disabled={activeGear <= 1} sx={{ fontSize: '1.5rem', minWidth: '64px', height: '64px', borderRadius: 4 }}>-</Button>
+        <Box sx={{ textAlign: 'center' }}>
+          <Typography variant="overline" color="text.secondary">GANG</Typography>
+          <Typography variant="h4" color="primary" sx={{ fontWeight: 'bold' }}>{activeGear}</Typography>
+        </Box>
+        <Button variant="outlined" size="large" onClick={shiftUp} disabled={activeGear >= gears} sx={{ fontSize: '1.5rem', minWidth: '64px', height: '64px', borderRadius: 4 }}>+</Button>
+      </Paper>
+    </Box>
+  );
 
   return (
     <ThemeProvider theme={darkTheme}>
@@ -317,160 +365,217 @@ export default function App() {
             alignItems: 'center',
             p: 2,
             px: { xs: 2, sm: 4 },
-            flexDirection: driverSide === 'left' ? 'row-reverse' : 'row'
+            flexDirection: driverSide === 'left' ? 'row-reverse' : 'row',
+            borderBottom: '1px solid rgba(255,255,255,0.05)'
           }}>
-            <Typography variant="subtitle1" sx={{ fontWeight: 900, letterSpacing: 3, color: 'text.secondary', opacity: 0.5 }}>
-              VROOM
-            </Typography>
+            <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 900, letterSpacing: 3, color: 'text.secondary', opacity: 0.5 }}>
+                VROOM
+              </Typography>
+              {isClientRole && (
+                <ToggleButtonGroup
+                  size="small"
+                  value={remoteViewActive ? 'remote' : 'cockpit'}
+                  exclusive
+                  onChange={(_, val) => val !== null && setRemoteViewActive(val === 'remote')}
+                >
+                  <ToggleButton value="cockpit"><FaCar style={{ marginRight: 6 }} /> Cockpit</ToggleButton>
+                  <ToggleButton value="remote"><FaGamepad style={{ marginRight: 6 }} /> Remote</ToggleButton>
+                </ToggleButtonGroup>
+              )}
+            </Stack>
 
             <Stack direction="row" spacing={2}>
-              <IconButton
-                onClick={() => setSettingsOpen(true)}
-                sx={{ bgcolor: 'background.paper', border: '1px solid rgba(255,255,255,0.1)' }}
-              >
+              <IconButton onClick={() => setSettingsOpen(true)} sx={{ bgcolor: 'background.paper', border: '1px solid rgba(255,255,255,0.1)' }}>
                 <FaGear />
               </IconButton>
-
-              <IconButton
-                onClick={toggleEngine}
-                sx={{
-                  bgcolor: engineStarted ? 'rgba(255,0,0,0.1)' : 'rgba(16,185,129,0.1)',
-                  color: engineStarted ? '#f43f5e' : '#10b981',
-                  border: engineStarted ? '1px solid rgba(244,63,94,0.2)' : '1px solid rgba(16,185,129,0.2)'
-                }}
-              >
-                <FaPowerOff />
-              </IconButton>
+              {!remoteViewActive && (
+                <IconButton
+                  onClick={toggleEngine}
+                  sx={{
+                    bgcolor: engineStarted ? 'rgba(255,0,0,0.1)' : 'rgba(16,185,129,0.1)',
+                    color: engineStarted ? '#f43f5e' : '#10b981',
+                    border: engineStarted ? '1px solid rgba(244,63,94,0.2)' : '1px solid rgba(16,185,129,0.2)'
+                  }}
+                >
+                  <FaPowerOff />
+                </IconButton>
+              )}
             </Stack>
           </Box>
 
-          <Box sx={{ px: { xs: 2, sm: 4 }, pb: 2, display: 'flex', justifyContent: 'center' }}>
-            <ToggleButtonGroup
-              color="primary"
-              value={mode}
-              exclusive
-              onChange={(_, m) => m && setMode(m)}
-              size="small"
-              fullWidth
-              sx={{
-                bgcolor: 'background.paper',
-                borderRadius: 2,
-                maxWidth: 600,
-                '& .MuiToggleButton-root': {
-                  py: 1,
-                  fontSize: { xs: '0.7rem', sm: '0.875rem' },
-                  whiteSpace: 'nowrap'
-                }
-              }}
-            >
-              <ToggleButton value="gps"><FaCar style={{ marginRight: 6 }} /> AUTO</ToggleButton>
-              <ToggleButton value="manual">MANUAL</ToggleButton>
-              <ToggleButton value="sensor"><FaMobileScreen style={{ marginRight: 6 }} /> SENSOR</ToggleButton>
-              <ToggleButton value="solo">SOLO</ToggleButton>
-            </ToggleButtonGroup>
-          </Box>
+          {remoteViewActive ? (
+            <Box sx={{ p: 2, display: 'flex', flexDirection: 'column', gap: 2, maxWidth: 600, margin: '0 auto', width: '100%' }}>
 
-          {(mode === 'sensor' || mode === 'solo') && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', px: 3, mt: 2 }}>
-              <Paper elevation={0} sx={{ p: 3, borderRadius: 4, bgcolor: 'background.paper', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, maxWidth: 500, width: '100%' }}>
+              <Stack direction="row" spacing={2}>
+                <Paper sx={{ p: 2, flex: 1, bgcolor: 'background.paper', borderRadius: 3, textAlign: 'center' }}>
+                  <Typography variant="overline" color="text.secondary">Speed</Typography>
+                  <Typography variant="h4" color="primary" sx={{ fontWeight: 'bold' }}>{Math.round(absSpeed)} <Typography component="span" variant="caption">km/h</Typography></Typography>
+                </Paper>
+                <Paper sx={{ p: 2, flex: 1, bgcolor: 'background.paper', borderRadius: 3, textAlign: 'center' }}>
+                  <Typography variant="overline" color="text.secondary">RPM</Typography>
+                  <Typography variant="h4" color="primary" sx={{ fontWeight: 'bold' }}>{displayRpm || 0}</Typography>
+                </Paper>
+              </Stack>
 
-                {mode === 'sensor' && !peer.connected && (
-                  <Stack direction="column" spacing={3} sx={{ width: '100%', alignItems: 'center' }}>
-                    {peer.peerId ? (
-                      <Box sx={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                        <Box>
-                          <Typography variant="overline" color="text.secondary">DEIN HOST-PIN</Typography>
-                          <Typography variant="h3" color="primary" sx={{ letterSpacing: 8, fontWeight: 'bold' }}>{peer.peerId}</Typography>
-                        </Box>
+              <Button
+                variant="contained"
+                size="large"
+                onClick={toggleEngine}
+                sx={{
+                  py: 3, borderRadius: 3, fontSize: '1.2rem', fontWeight: 'bold',
+                  bgcolor: engineStarted ? 'error.main' : 'success.main',
+                  '&:hover': { bgcolor: engineStarted ? 'error.dark' : 'success.dark' }
+                }}
+                startIcon={<FaPowerOff />}
+              >
+                {engineStarted ? 'MOTOR AUSSCHALTEN' : 'MOTOR STARTEN'}
+              </Button>
 
-                        <Box sx={{ p: 2, bgcolor: '#ffffff', borderRadius: 2 }}>
-                          <QRCodeSVG
-                            value={`${window.location.origin}${window.location.pathname}?pin=${peer.peerId}`}
-                            size={160}
-                          />
-                        </Box>
-                        <Typography variant="caption" color="text.secondary">
-                          Mit dem Handy scannen zum automatischen Verbinden
-                        </Typography>
-                      </Box>
-                    ) : (
-                      <Button variant="outlined" size="large" onClick={peer.hostServer} sx={{ width: '100%' }}>Als Auto (Host) starten</Button>
-                    )}
-                    <Divider sx={{ width: '100%' }}>ODER</Divider>
-                    <Stack direction="row" spacing={1} sx={{ width: '100%' }}>
-                      <TextField fullWidth size="small" placeholder="Handy-PIN eingeben" value={joinCode} onChange={e => setJoinCode(e.target.value.replace(/\D/g, '').slice(0, 4))} />
-                      <Button variant="contained" disabled={joinCode.length < 4} onClick={() => { setIsClientRole(true); peer.connectToServer(joinCode); }}>Verbinden</Button>
+              {gearControlsUI}
+
+              <Paper sx={{ p: 3, bgcolor: 'background.paper', borderRadius: 3 }}>
+                <Typography variant="overline" color="text.secondary" sx={{ mb: 2, display: 'block' }}>Audio Mixer</Typography>
+
+                <Stack spacing={3}>
+                  <Box>
+                    <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
+                      <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><FaVolumeHigh /> Master</Typography>
+                      <Typography variant="caption">{masterVol}%</Typography>
                     </Stack>
-                  </Stack>
-                )}
+                    <Slider value={masterVol} onChange={(_, v) => handleVolumeChange('master', v as number)} />
+                  </Box>
+                  <Box>
+                    <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
+                      <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><FaCar /> Engine</Typography>
+                      <Typography variant="caption">{engineVol}%</Typography>
+                    </Stack>
+                    <Slider value={engineVol} onChange={(_, v) => handleVolumeChange('engine', v as number)} color="secondary" />
+                  </Box>
+                  <Box>
+                    <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
+                      <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><FaMusic /> Spotify</Typography>
+                      <Typography variant="caption">{spotVol}%</Typography>
+                    </Stack>
+                    <Slider value={spotVol} onChange={(_, v) => handleVolumeChange('spotify', v as number)} sx={{ color: '#1DB954' }} />
+                  </Box>
+                </Stack>
+              </Paper>
 
-                {(mode === 'solo' || (mode === 'sensor' && peer.connected)) && (
-                  <Stack direction="column" spacing={2} sx={{ width: '100%', alignItems: 'center' }}>
-                    {mode === 'sensor' && <Typography color="success.main" sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}><FaLink /> Erfolgreich verbunden</Typography>}
+            </Box>
+          ) : (
+            <>
+              <Box sx={{ px: { xs: 2, sm: 4 }, pb: 2, pt: 2, display: 'flex', justifyContent: 'center' }}>
+                <ToggleButtonGroup
+                  color="primary"
+                  value={mode}
+                  exclusive
+                  onChange={(_, m) => m && setMode(m)}
+                  size="small"
+                  fullWidth
+                  sx={{
+                    bgcolor: 'background.paper',
+                    borderRadius: 2,
+                    maxWidth: 600,
+                    '& .MuiToggleButton-root': { py: 1, fontSize: { xs: '0.7rem', sm: '0.875rem' }, whiteSpace: 'nowrap' }
+                  }}
+                >
+                  <ToggleButton value="gps"><FaCar style={{ marginRight: 6 }} /> AUTO</ToggleButton>
+                  <ToggleButton value="manual">MANUAL</ToggleButton>
+                  <ToggleButton value="sensor"><FaMobileScreen style={{ marginRight: 6 }} /> SENSOR</ToggleButton>
+                  <ToggleButton value="solo">SOLO</ToggleButton>
+                </ToggleButtonGroup>
+              </Box>
 
-                    {(!sensor.hasPermission && (mode === 'solo' || isClientRole)) ? (
-                      <Button variant="contained" color="primary" size="large" fullWidth onClick={sensor.requestAccess}>Sensoren aktivieren</Button>
-                    ) : (
-                      <Stack direction="row" spacing={2} sx={{ width: '100%' }}>
-                        <Button fullWidth variant="outlined" color="inherit" onClick={handleCalibrate} startIcon={<FaArrowsToEye />}>Kalibrieren</Button>
-                        <Button fullWidth variant={sensor.isPaused ? "contained" : "outlined"} color={sensor.isPaused ? "primary" : "inherit"} onClick={sensor.togglePause} startIcon={sensor.isPaused ? <FaPlay /> : <FaPause />}>
-                          {sensor.isPaused ? "Fortsetzen" : "Pausieren"}
-                        </Button>
+              {(mode === 'sensor' || mode === 'solo') && (
+                <Box sx={{ display: 'flex', justifyContent: 'center', px: 3, mt: 2 }}>
+                  <Paper elevation={0} sx={{ p: 3, borderRadius: 4, bgcolor: 'background.paper', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, maxWidth: 500, width: '100%' }}>
+
+                    {mode === 'sensor' && !peer.connected && (
+                      <Stack direction="column" spacing={3} sx={{ width: '100%', alignItems: 'center' }}>
+                        {peer.peerId ? (
+                          <Box sx={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                            <Box>
+                              <Typography variant="overline" color="text.secondary">DEIN HOST-PIN</Typography>
+                              <Typography variant="h3" color="primary" sx={{ letterSpacing: 8, fontWeight: 'bold' }}>{peer.peerId}</Typography>
+                            </Box>
+
+                            <Box sx={{ p: 2, bgcolor: '#ffffff', borderRadius: 2 }}>
+                              <QRCodeSVG
+                                value={`${window.location.origin}${window.location.pathname}?pin=${peer.peerId}`}
+                                size={160}
+                              />
+                            </Box>
+                            <Typography variant="caption" color="text.secondary">
+                              Mit dem Handy scannen zum automatischen Verbinden
+                            </Typography>
+                          </Box>
+                        ) : (
+                          <Button variant="outlined" size="large" onClick={peer.hostServer} sx={{ width: '100%' }}>Als Auto (Host) starten</Button>
+                        )}
+                        <Divider sx={{ width: '100%' }}>ODER</Divider>
+                        <Stack direction="row" spacing={1} sx={{ width: '100%' }}>
+                          <TextField fullWidth size="small" placeholder="Handy-PIN eingeben" value={joinCode} onChange={e => setJoinCode(e.target.value.replace(/\D/g, '').slice(0, 4))} />
+                          <Button variant="contained" disabled={joinCode.length < 4} onClick={() => { setIsClientRole(true); peer.connectToServer(joinCode); }}>Verbinden</Button>
+                        </Stack>
                       </Stack>
                     )}
-                  </Stack>
+
+                    {(mode === 'solo' || (mode === 'sensor' && peer.connected)) && (
+                      <Stack direction="column" spacing={2} sx={{ width: '100%', alignItems: 'center' }}>
+                        {mode === 'sensor' && <Typography color="success.main" sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}><FaLink /> Erfolgreich verbunden</Typography>}
+
+                        {(!sensor.hasPermission && (mode === 'solo' || isClientRole)) ? (
+                          <Button variant="contained" color="primary" size="large" fullWidth onClick={sensor.requestAccess}>Sensoren aktivieren</Button>
+                        ) : (
+                          <Stack direction="row" spacing={2} sx={{ width: '100%' }}>
+                            <Button fullWidth variant="outlined" color="inherit" onClick={handleCalibrate} startIcon={<FaArrowsToEye />}>Kalibrieren</Button>
+                            <Button fullWidth variant={sensor.isPaused ? "contained" : "outlined"} color={sensor.isPaused ? "primary" : "inherit"} onClick={sensor.togglePause} startIcon={sensor.isPaused ? <FaPlay /> : <FaPause />}>
+                              {sensor.isPaused ? "Fortsetzen" : "Pausieren"}
+                            </Button>
+                          </Stack>
+                        )}
+                      </Stack>
+                    )}
+                  </Paper>
+                </Box>
+              )}
+
+              <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                <Dashboard speed={finalDisplaySpeed} onStop={toggleEngine} />
+                {(mode === 'gps' || mode === 'sensor') && gpsError && (
+                  <Typography color="error" variant="body2" sx={{ mt: 2 }}>{gpsError}</Typography>
                 )}
-              </Paper>
-            </Box>
+              </Box>
+
+              <Box sx={{ p: { xs: 2, sm: 4 }, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '120px', pb: { xs: 4, sm: 4 } }}>
+
+                {gearControlsUI}
+
+                {mode === 'manual' ? (
+                  <Box sx={{ width: '100%', maxWidth: 600, textAlign: 'center' }}>
+                    <Typography variant="overline" color="primary" sx={{ lineHeight: 1, fontWeight: 'bold', display: 'block', mb: 1 }}>
+                      {displayRpm || 0} RPM
+                    </Typography>
+                    <Controls targetLoad={targetLoad} setTargetLoad={setTargetLoad} />
+                  </Box>
+                ) : (
+                  <Box sx={{ width: '100%', maxWidth: 600, textAlign: 'center' }}>
+                    <Stack sx={{ mb: 1, px: 1 }}>
+                      <Typography variant="overline" color="text.secondary" sx={{ lineHeight: 1 }}>
+                        THROTTLE / LOAD
+                      </Typography>
+                      <Typography variant="overline" color="primary" sx={{ lineHeight: 1, fontWeight: 'bold' }}>
+                        {displayRpm || 0} RPM
+                      </Typography>
+                    </Stack>
+                    <LinearProgress variant="determinate" value={Math.max(0, Math.min(100, (displayRpmRatio || 0) * 100))} sx={{ height: 8, borderRadius: 4 }} />
+                    {targetLoad < 0 && <Typography color="error" variant="caption" sx={{ display: 'block', mt: 1 }}>Bremsend ({Math.round(targetLoad * -100)}%)</Typography>}
+                  </Box>
+                )}
+              </Box>
+            </>
           )}
-
-          <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-            <Dashboard speed={finalDisplaySpeed} onStop={toggleEngine} />
-            {(mode === 'gps' || mode === 'sensor') && gpsError && (
-              <Typography color="error" variant="body2" sx={{ mt: 2 }}>{gpsError}</Typography>
-            )}
-          </Box>
-
-          <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-            <Dashboard speed={finalDisplaySpeed} onStop={toggleEngine} />
-            {(mode === 'gps' || mode === 'sensor') && gpsError && (
-              <Typography color="error" variant="body2" sx={{ mt: 2 }}>{gpsError}</Typography>
-            )}
-          </Box>
-
-          <Box sx={{ p: { xs: 2, sm: 4 }, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '120px', pb: { xs: 4, sm: 4 } }}>
-
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, mb: 3, width: '100%', maxWidth: 300 }}>
-              <Button variant="outlined" size="large" onClick={shiftDown} disabled={currentGear <= 1} sx={{ fontSize: '1.5rem', minWidth: '64px', borderRadius: 3 }}>-</Button>
-              <Typography variant="h4" sx={{ fontWeight: 'bold', minWidth: '100px', textAlign: 'center', color: 'primary.main' }}>
-                G {currentGear}
-              </Typography>
-              <Button variant="outlined" size="large" onClick={shiftUp} disabled={currentGear >= gears} sx={{ fontSize: '1.5rem', minWidth: '64px', borderRadius: 3 }}>+</Button>
-            </Box>
-
-            {mode === 'manual' ? (
-              <Box sx={{ width: '100%', maxWidth: 600, textAlign: 'center' }}>
-                <Typography variant="overline" color="primary" sx={{ lineHeight: 1, fontWeight: 'bold', display: 'block', mb: 1 }}>
-                  {displayRpm || 0} RPM
-                </Typography>
-                <Controls targetLoad={targetLoad} setTargetLoad={setTargetLoad} />
-              </Box>
-            ) : (
-              <Box sx={{ width: '100%', maxWidth: 600, textAlign: 'center' }}>
-                <Stack sx={{ mb: 1, px: 1 }}>
-                  <Typography variant="overline" color="text.secondary" sx={{ lineHeight: 1 }}>
-                    THROTTLE / LOAD
-                  </Typography>
-                  <Typography variant="overline" color="primary" sx={{ lineHeight: 1, fontWeight: 'bold' }}>
-                    {displayRpm || 0} RPM
-                  </Typography>
-                </Stack>
-                <LinearProgress variant="determinate" value={Math.max(0, Math.min(100, (displayRpmRatio || 0) * 100))} sx={{ height: 8, borderRadius: 4 }} />
-                {targetLoad < 0 && <Typography color="error" variant="caption" sx={{ display: 'block', mt: 1 }}>Bremsend ({Math.round(targetLoad * -100)}%)</Typography>}
-              </Box>
-            )}
-
-          </Box>
 
           <SettingsDrawer
             open={settingsOpen} onClose={() => setSettingsOpen(false)}

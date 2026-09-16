@@ -22,6 +22,7 @@ export interface SyncState {
     rpm?: number;
     rpmRatio?: number;
     currentGear?: number;
+    isAutoShift?: boolean;
 }
 
 export function usePeer(onIncomingSync: (state: SyncState) => void) {
@@ -61,9 +62,7 @@ export function usePeer(onIncomingSync: (state: SyncState) => void) {
             const id = 'vroom-' + Math.floor(1000 + Math.random() * 9000).toString();
 
             const newPeer = new Peer(id, {
-                config: {
-                    iceServers: getIceServers()
-                },
+                config: { iceServers: getIceServers() },
                 debug: 2
             });
 
@@ -74,18 +73,14 @@ export function usePeer(onIncomingSync: (state: SyncState) => void) {
 
             newPeer.on('connection', (conn: DataConnection) => {
                 console.log('[Vroom] Host: eingehende Verbindung von:', conn.peer);
-
                 conn.on('open', () => {
                     console.log('[Vroom] Datenkanal ist jetzt offen zu:', conn.peer);
-
                     setConnection(conn);
                     setConnected(true);
                 });
-
                 conn.on('data', (data: unknown) => {
                     onIncomingSync(data as SyncState);
                 });
-
                 conn.on('close', () => {
                     setConnected(false);
                     setConnection(null);
@@ -108,25 +103,20 @@ export function usePeer(onIncomingSync: (state: SyncState) => void) {
             const fullId = 'vroom-' + pin;
 
             const newPeer = new Peer({
-                config: {
-                    iceServers: getIceServers()
-                },
+                config: { iceServers: getIceServers() },
                 debug: 2
             });
 
             newPeer.on('open', () => {
                 const conn = newPeer.connect(fullId);
-
                 conn.on('open', () => {
                     console.log('[Vroom] Client: Verbunden mit Host');
                     setConnection(conn);
                     setConnected(true);
                 });
-
                 conn.on('data', (data: unknown) => {
                     onIncomingSync(data as SyncState);
                 });
-
                 conn.on('close', () => {
                     setConnected(false);
                     setConnection(null);

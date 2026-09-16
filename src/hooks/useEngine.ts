@@ -11,7 +11,8 @@ export function useEngine(
     uiShiftPoint: number,
     mode: 'gps' | 'manual' | 'sensor' | 'solo' = 'manual',
     gpsSpeed: number = 0,
-    manualGear: number = 1
+    manualGear: number = 1,
+    isAutoShift: boolean = true
 ) {
     const [engineStarted, setEngineStarted] = useState(false);
     const [speed, setSpeed] = useState(0);
@@ -232,13 +233,21 @@ export function useEngine(
                 let targetGearRpm: number;
                 if (uiGears > 1) {
                     const speedPerGear = maxSpeed / uiGears;
-                    const gearMinSpeed = (manualGear - 1) * speedPerGear;
+
+                    let currentActiveGear = manualGear;
+                    if (isAutoShift) {
+                        currentActiveGear = Math.min(uiGears, Math.max(1, Math.ceil(newSpeed / speedPerGear)));
+                    }
+
+                    const gearMinSpeed = (currentActiveGear - 1) * speedPerGear;
                     let speedInCurrentGear = newSpeed - gearMinSpeed;
                     if (speedInCurrentGear < 0) speedInCurrentGear = 0;
+
                     let gearProgress = speedInCurrentGear / speedPerGear;
+
                     if (gearProgress > 1.2) gearProgress = 1.2;
 
-                    const startRpm = manualGear === 1 ? idleRPM : effectiveMaxRPM * 0.65;
+                    const startRpm = currentActiveGear === 1 ? idleRPM : effectiveMaxRPM * 0.65;
                     targetGearRpm = startRpm + gearProgress * (effectiveMaxRPM - startRpm);
                 } else {
                     targetGearRpm = idleRPM + (newSpeed / maxSpeed) * (effectiveMaxRPM - idleRPM);
@@ -339,7 +348,7 @@ export function useEngine(
         }, 50);
 
         return () => clearInterval(interval);
-    }, [engineStarted, targetLoad, maxSpeed, uiGears, uiShiftPoint, selectedPackId, mode, gpsSpeed]);
+    }, [engineStarted, targetLoad, maxSpeed, uiGears, uiShiftPoint, selectedPackId, mode, gpsSpeed, manualGear, isAutoShift]);
 
     return { engineStarted, speed, targetLoad, setTargetLoad, startEngine, stopEngine, rpm, rpmRatio };
 }
