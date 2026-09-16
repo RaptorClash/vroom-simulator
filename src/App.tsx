@@ -110,7 +110,7 @@ export default function App() {
       sensor.calibrate();
     }
 
-    syncLockTimer.current = window.setTimeout(() => { isReceivingSync.current = false; }, 150);
+    syncLockTimer.current = window.setTimeout(() => { isReceivingSync.current = false; }, 50);
   };
 
   const peer = usePeer(handleIncomingSync);
@@ -202,19 +202,22 @@ export default function App() {
     rpmStateRef.current = { rpm, rpmRatio };
   }, [rpm, rpmRatio]);
 
+  const loadRef = useRef(sensor.load);
+  useEffect(() => { loadRef.current = sensor.load; }, [sensor.load]);
+
   useEffect(() => {
-    if (peer.connected && !isClientRole) {
+    if (peer.connected && isClientRole) {
       const interval = setInterval(() => {
-        peer.broadcastState({
-          syncedSpeed: speedRef.current,
-          rpm: rpmStateRef.current.rpm,
-          rpmRatio: rpmStateRef.current.rpmRatio
-        });
-      }, 100);
+        if (!isReceivingSync.current) {
+          peer.broadcastState({
+            targetLoad: loadRef.current,
+            isPaused: sensor.isPaused
+          });
+        }
+      }, 50);
       return () => clearInterval(interval);
     }
-  }, [peer.connected, isClientRole, peer]);
-
+  }, [peer.connected, isClientRole, sensor.isPaused, peer]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);

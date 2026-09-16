@@ -225,11 +225,8 @@ export function useEngine(
             if (rpmRef.current === 0) rpmRef.current = idleRPM;
 
             if (newSpeed < 3.0) {
-                if (targetLoad > 0.05) {
-                    rpmRef.current += targetLoad * 250;
-                } else {
-                    rpmRef.current -= 120;
-                }
+                const targetIdleRpm = idleRPM + (targetLoad * (effectiveMaxRPM - idleRPM));
+                rpmRef.current += (targetIdleRpm - rpmRef.current) * 0.15;
             } else {
                 let targetGearRpm: number;
                 if (uiGears > 1) {
