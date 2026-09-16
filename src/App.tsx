@@ -60,6 +60,8 @@ export default function App() {
 
   const sensor = useMotionSensor();
 
+  const localTrueSpeed = (mode === 'gps' || mode === 'sensor' || mode === 'solo') ? gpsSpeed : 0;
+
   const { engineStarted, speed, targetLoad, setTargetLoad, startEngine, stopEngine, rpm, rpmRatio } = useEngine(
     packId, isClientRole ? 0 : (masterVol / 100) * engineVol, maxSpd, gears, shiftPt, mode === 'solo' ? 'sensor' : mode, gpsSpeed, currentGear, isAutoShift
   );
@@ -79,12 +81,6 @@ export default function App() {
       return () => clearTimeout(timer);
     }
   }, [isRestarting, startEngine]);
-
-  const handleVolumeChange = (type: 'master' | 'engine' | 'spotify', newValue: number) => {
-    if (type === 'master') { setMasterVol(newValue); if (peer.connected) peer.broadcastState({ masterVol: newValue }); }
-    if (type === 'engine') { setEngineVol(newValue); if (peer.connected) peer.broadcastState({ engineVol: newValue }); }
-    if (type === 'spotify') { setSpotVol(newValue); if (peer.connected) peer.broadcastState({ spotifyVol: newValue }); }
-  };
 
   const handleIncomingSync = (state: SyncState) => {
     isReceivingSync.current = true;
@@ -128,10 +124,79 @@ export default function App() {
 
   const peer = usePeer(handleIncomingSync);
 
+  const handleVolumeChange = (type: 'master' | 'engine' | 'spotify', newValue: number) => {
+    if (type === 'master') { setMasterVol(newValue); if (peer.connected) peer.broadcastState({ masterVol: newValue }); }
+    if (type === 'engine') { setEngineVol(newValue); if (peer.connected) peer.broadcastState({ engineVol: newValue }); }
+    if (type === 'spotify') { setSpotVol(newValue); if (peer.connected) peer.broadcastState({ spotifyVol: newValue }); }
+  };
+
   const handleCalibrate = () => {
     sensor.calibrate();
     if (peer.connected) {
       peer.broadcastState({ doCalibrate: Date.now() });
+    }
+  };
+
+  const finalDisplaySpeed = (isClientRole && syncedSpeed !== null) ? syncedSpeed : (mode === 'manual' ? speed : localTrueSpeed);
+  const absSpeed = Math.abs(finalDisplaySpeed);
+
+  const speedPerGear = maxSpd / gears;
+  const autoCalculatedGear = Math.min(gears, Math.max(1, Math.ceil(absSpeed / speedPerGear)));
+  const activeGear = isAutoShift ? autoCalculatedGear : currentGear;
+
+  const displayRpm = (isClientRole && syncedRpm !== null) ? syncedRpm : rpm;
+  const displayRpmRatio = (isClientRole && syncedRpmRatio !== null) ? syncedRpmRatio : rpmRatio;
+
+  useEffect(() => {
+    if (isAutoShift || !engineStarted) return;
+
+    const maxSpeedForCurrentGear = currentGear * speedPerGear;
+    const minSpeedForCurrentGear = (currentGear - 1) * speedPerGear;
+
+    if (absSpeed > maxSpeedForCurrentGear * 1.15 && currentGear < gears) {
+      setTimeout(() => {
+        const next = currentGear + 1;
+        setCurrentGear(next);
+        if (peer.connected) peer.broadcastState({ currentGear: next, isAutoShift: false });
+      }, 0);
+    }
+    else if (absSpeed < minSpeedForCurrentGear * 0.8 && currentGear > 1) {
+      setTimeout(() => {
+        const prev = currentGear - 1;
+        setCurrentGear(prev);
+        if (peer.connected) peer.broadcastState({ currentGear: prev, isAutoShift: false });
+      }, 0);
+    }
+  }, [absSpeed, currentGear, gears, speedPerGear, isAutoShift, engineStarted, peer]);
+
+  const shiftUp = () => {
+    setIsAutoShift(false);
+    const minRequiredSpeed = (currentGear - 1) * speedPerGear + (speedPerGear * 0.35);
+
+    if (currentGear < gears && absSpeed >= minRequiredSpeed) {
+      const newGear = currentGear + 1;
+      setCurrentGear(newGear);
+      if (peer.connected) peer.broadcastState({ currentGear: newGear, isAutoShift: false });
+    }
+  };
+
+  const shiftDown = () => {
+    setIsAutoShift(false);
+    const maxAllowedSpeedForLowerGear = ((currentGear - 1) * speedPerGear) * 1.25;
+
+    if (currentGear > 1 && absSpeed <= maxAllowedSpeedForLowerGear) {
+      const newGear = currentGear - 1;
+      setCurrentGear(newGear);
+      if (peer.connected) peer.broadcastState({ currentGear: newGear, isAutoShift: false });
+    }
+  };
+
+  const handleAutoShiftToggle = (_: React.MouseEvent<HTMLElement>, val: string | null) => {
+    if (val !== null) {
+      const newAuto = val === 'auto';
+      setIsAutoShift(newAuto);
+      if (newAuto) setCurrentGear(autoCalculatedGear);
+      if (peer.connected) peer.broadcastState({ isAutoShift: newAuto, currentGear: autoCalculatedGear });
     }
   };
 
@@ -203,8 +268,6 @@ export default function App() {
     return () => navigator.geolocation.clearWatch(watchId);
   }, [mode, engineStarted, setTargetLoad]);
 
-
-  const localTrueSpeed = (mode === 'gps' || mode === 'sensor' || mode === 'solo') ? gpsSpeed : speed;
   const speedRef = useRef(localTrueSpeed);
   const rpmStateRef = useRef({ rpm: 0, rpmRatio: 0 });
 
@@ -291,37 +354,8 @@ export default function App() {
     restartEngineSmoothly();
   };
 
-  const finalDisplaySpeed = (isClientRole && syncedSpeed !== null) ? syncedSpeed : localTrueSpeed;
-  const absSpeed = Math.abs(finalDisplaySpeed);
-  const gearSpeedRange = maxSpd / gears;
-  const autoCalculatedGear = Math.min(gears, Math.max(1, Math.ceil(absSpeed / gearSpeedRange)));
-  const activeGear = isAutoShift ? autoCalculatedGear : currentGear;
-
-  const displayRpm = (isClientRole && syncedRpm !== null) ? syncedRpm : rpm;
-  const displayRpmRatio = (isClientRole && syncedRpmRatio !== null) ? syncedRpmRatio : rpmRatio;
-
-  const shiftUp = () => {
-    setIsAutoShift(false);
-    const nextGear = Math.min(isAutoShift ? autoCalculatedGear + 1 : currentGear + 1, gears);
-    setCurrentGear(nextGear);
-    if (peer.connected) peer.broadcastState({ currentGear: nextGear, isAutoShift: false });
-  };
-
-  const shiftDown = () => {
-    setIsAutoShift(false);
-    const nextGear = Math.max(isAutoShift ? autoCalculatedGear - 1 : currentGear - 1, 1);
-    setCurrentGear(nextGear);
-    if (peer.connected) peer.broadcastState({ currentGear: nextGear, isAutoShift: false });
-  };
-
-  const handleAutoShiftToggle = (_: React.MouseEvent<HTMLElement>, val: string | null) => {
-    if (val !== null) {
-      const newAuto = val === 'auto';
-      setIsAutoShift(newAuto);
-      if (newAuto) setCurrentGear(autoCalculatedGear);
-      if (peer.connected) peer.broadcastState({ isAutoShift: newAuto, currentGear: autoCalculatedGear });
-    }
-  };
+  const isShiftUpDisabled = currentGear >= gears || absSpeed < ((currentGear - 1) * speedPerGear + (speedPerGear * 0.35));
+  const isShiftDownDisabled = currentGear <= 1 || absSpeed > (((currentGear - 1) * speedPerGear) * 1.25);
 
   const gearControlsUI = (
     <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: 3, width: '100%', maxWidth: 300, mx: 'auto' }}>
@@ -337,15 +371,33 @@ export default function App() {
       </ToggleButtonGroup>
 
       <Paper sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-        <Button variant="outlined" size="large" onClick={shiftDown} disabled={activeGear <= 1} sx={{ fontSize: '1.5rem', minWidth: '64px', height: '64px', borderRadius: 4 }}>-</Button>
+        <Button variant="outlined" size="large" onClick={shiftDown} disabled={isAutoShift ? currentGear <= 1 : isShiftDownDisabled} sx={{ fontSize: '1.5rem', minWidth: '64px', height: '64px', borderRadius: 4 }}>-</Button>
         <Box sx={{ textAlign: 'center' }}>
           <Typography variant="overline" color="text.secondary">GANG</Typography>
           <Typography variant="h4" color="primary" sx={{ fontWeight: 'bold' }}>{activeGear}</Typography>
         </Box>
-        <Button variant="outlined" size="large" onClick={shiftUp} disabled={activeGear >= gears} sx={{ fontSize: '1.5rem', minWidth: '64px', height: '64px', borderRadius: 4 }}>+</Button>
+        <Button variant="outlined" size="large" onClick={shiftUp} disabled={isAutoShift ? currentGear >= gears : isShiftUpDisabled} sx={{ fontSize: '1.5rem', minWidth: '64px', height: '64px', borderRadius: 4 }}>+</Button>
       </Paper>
     </Box>
   );
+
+  const sensorControlsUI = (mode === 'solo' || (mode === 'sensor' && peer.connected)) && (
+    <Stack direction="column" spacing={2} sx={{ width: '100%', alignItems: 'center', mt: 2 }}>
+      {mode === 'sensor' && <Typography color="success.main" sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}><FaLink /> Erfolgreich verbunden</Typography>}
+
+      {(!sensor.hasPermission && (mode === 'solo' || isClientRole)) ? (
+        <Button variant="contained" color="primary" size="large" fullWidth onClick={sensor.requestAccess}>Sensoren aktivieren</Button>
+      ) : (
+        <Stack direction="row" spacing={2} sx={{ width: '100%' }}>
+          <Button fullWidth variant="outlined" color="inherit" onClick={handleCalibrate} startIcon={<FaArrowsToEye />}>Kalibrieren</Button>
+          <Button fullWidth variant={sensor.isPaused ? "contained" : "outlined"} color={sensor.isPaused ? "primary" : "inherit"} onClick={sensor.togglePause} startIcon={sensor.isPaused ? <FaPlay /> : <FaPause />}>
+            {sensor.isPaused ? "Fortsetzen" : "Pausieren"}
+          </Button>
+        </Stack>
+      )}
+    </Stack>
+  );
+
 
   return (
     <ThemeProvider theme={darkTheme}>
@@ -372,7 +424,8 @@ export default function App() {
               <Typography variant="subtitle1" sx={{ fontWeight: 900, letterSpacing: 3, color: 'text.secondary', opacity: 0.5 }}>
                 VROOM
               </Typography>
-              {isClientRole && (
+
+              {(isClientRole || mode === 'sensor' || mode === 'solo') && (
                 <ToggleButtonGroup
                   size="small"
                   value={remoteViewActive ? 'remote' : 'cockpit'}
@@ -434,7 +487,9 @@ export default function App() {
 
               {gearControlsUI}
 
-              <Paper sx={{ p: 3, bgcolor: 'background.paper', borderRadius: 3 }}>
+              {sensorControlsUI}
+
+              <Paper sx={{ p: 3, bgcolor: 'background.paper', borderRadius: 3, mt: 1 }}>
                 <Typography variant="overline" color="text.secondary" sx={{ mb: 2, display: 'block' }}>Audio Mixer</Typography>
 
                 <Stack spacing={3}>
@@ -520,23 +575,7 @@ export default function App() {
                         </Stack>
                       </Stack>
                     )}
-
-                    {(mode === 'solo' || (mode === 'sensor' && peer.connected)) && (
-                      <Stack direction="column" spacing={2} sx={{ width: '100%', alignItems: 'center' }}>
-                        {mode === 'sensor' && <Typography color="success.main" sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}><FaLink /> Erfolgreich verbunden</Typography>}
-
-                        {(!sensor.hasPermission && (mode === 'solo' || isClientRole)) ? (
-                          <Button variant="contained" color="primary" size="large" fullWidth onClick={sensor.requestAccess}>Sensoren aktivieren</Button>
-                        ) : (
-                          <Stack direction="row" spacing={2} sx={{ width: '100%' }}>
-                            <Button fullWidth variant="outlined" color="inherit" onClick={handleCalibrate} startIcon={<FaArrowsToEye />}>Kalibrieren</Button>
-                            <Button fullWidth variant={sensor.isPaused ? "contained" : "outlined"} color={sensor.isPaused ? "primary" : "inherit"} onClick={sensor.togglePause} startIcon={sensor.isPaused ? <FaPlay /> : <FaPause />}>
-                              {sensor.isPaused ? "Fortsetzen" : "Pausieren"}
-                            </Button>
-                          </Stack>
-                        )}
-                      </Stack>
-                    )}
+                    {sensorControlsUI}
                   </Paper>
                 </Box>
               )}
