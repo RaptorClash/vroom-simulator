@@ -139,11 +139,21 @@ export function usePeer(onIncomingSync: (state: SyncState) => void) {
         }
     }, [connection, connected]);
 
+    const disconnect = useCallback(() => {
+        if (connection) connection.close();
+        if (peer) peer.destroy();
+
+        setConnection(null);
+        setConnected(false);
+        setPeerId(null);
+        setError(null);
+    }, [connection, peer]);
+
     useEffect(() => {
         return () => {
             if (peer) peer.destroy();
         };
     }, [peer]);
 
-    return { hostServer, connectToServer, broadcastState, peerId, connected, error };
+    return { hostServer, connectToServer, broadcastState, disconnect, peerId, connected, error };
 }

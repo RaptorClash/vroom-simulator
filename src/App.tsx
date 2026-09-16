@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
-import { ThemeProvider, createTheme, CssBaseline, Box, Typography, ToggleButtonGroup, ToggleButton, LinearProgress, IconButton, Button, TextField, Stack, Paper, Divider, Slider } from '@mui/material';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { ThemeProvider, createTheme, CssBaseline, Box, Typography, ToggleButtonGroup, ToggleButton, LinearProgress, IconButton, Button, TextField, Stack, Paper, Divider, Slider, Snackbar, Alert } from '@mui/material';
 import { FaPowerOff, FaGear, FaLink, FaMobileScreen, FaCar, FaPause, FaPlay, FaArrowsToEye, FaVolumeHigh, FaMusic, FaGamepad } from 'react-icons/fa6';
 import { QRCodeSVG } from 'qrcode.react';
 import { soundPacks } from './audio/soundManager';
@@ -44,6 +44,9 @@ export default function App() {
   const [isAutoShift, setIsAutoShift] = useState(true);
 
   const [remoteViewActive, setRemoteViewActive] = useState(false);
+
+  const [snackbar, setSnackbar] = useState<{ open: boolean, msg: string, severity: 'success' | 'error' | 'warning' | 'info' }>({ open: false, msg: '', severity: 'info' });
+
   const [turnUrl, setTurnUrl] = useState(() => {
     try { const p = new URLSearchParams(window.location.search); if (p.has('turn')) return atob(p.get('turn')!); } catch (e) { console.error(e); } return getStr('vr_turn_url', '');
   });
@@ -59,7 +62,6 @@ export default function App() {
   const syncLockTimer = useRef<number | null>(null);
 
   const sensor = useMotionSensor();
-
   const localTrueSpeed = (mode === 'gps' || mode === 'sensor' || mode === 'solo') ? gpsSpeed : 0;
 
   const { engineStarted, speed, targetLoad, setTargetLoad, startEngine, stopEngine, rpm, rpmRatio } = useEngine(
@@ -82,7 +84,16 @@ export default function App() {
     }
   }, [isRestarting, startEngine]);
 
-  const handleIncomingSync = (state: SyncState) => {
+  const showSnackbar = useCallback((msg: string, severity: 'success' | 'error' | 'warning' | 'info' = 'info') => {
+    setSnackbar({ open: true, msg, severity });
+  }, []);
+
+  const handleCloseSnackbar = (_?: React.SyntheticEvent | Event, reason?: string) => {
+    if (reason === 'clickaway') return;
+    setSnackbar(prev => ({ ...prev, open: false }));
+  };
+
+  const handleIncomingSync = useCallback((state: SyncState) => {
     isReceivingSync.current = true;
     if (syncLockTimer.current) window.clearTimeout(syncLockTimer.current);
 
@@ -120,9 +131,72 @@ export default function App() {
     }
 
     syncLockTimer.current = window.setTimeout(() => { isReceivingSync.current = false; }, 50);
-  };
+  }, [gears, maxSpd, shiftPt, sensor, startEngine, stopEngine]);
 
   const peer = usePeer(handleIncomingSync);
+
+  const wasConnected = useRef(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  const reconnectAttempts = useRef(0);
+  const reconnectInterval = useRef<number | null>(null);
+
+  const cancelReconnection = () => {
+    if (reconnectInterval.current) {
+      clearInterval(reconnectInterval.current);
+      reconnectInterval.current = null;
+    }
+    setIsReconnecting(false);
+    peer.disconnect();
+    setIsClientRole(false);
+    showSnackbar("Verbindungsaufbau abgebrochen.", "info");
+  };
+
+  useEffect(() => {
+    if (peer.connected) {
+      if (!wasConnected.current) {
+        setTimeout(() => showSnackbar("Erfolgreich verbunden!", "success"), 0);
+      }
+      wasConnected.current = true;
+      if (isReconnecting) {
+        setTimeout(() => {
+          setIsReconnecting(false);
+          showSnackbar("Verbindung wiederhergestellt!", "success");
+        }, 0);
+        if (reconnectInterval.current) {
+          clearInterval(reconnectInterval.current);
+          reconnectInterval.current = null;
+        }
+      }
+    } else if (wasConnected.current) {
+      wasConnected.current = false;
+
+      if (isClientRole && joinCode) {
+        setTimeout(() => {
+          setIsReconnecting(true);
+          showSnackbar("Verbindung verloren. Versuche Reconnect...", "warning");
+        }, 0);
+        reconnectAttempts.current = 0;
+
+        reconnectInterval.current = window.setInterval(() => {
+          reconnectAttempts.current += 1;
+          if (reconnectAttempts.current > 5) {
+            cancelReconnection();
+            setTimeout(() => showSnackbar("Verbindung endgültig abgebrochen. Host hat vermutlich neu geladen.", "error"), 0);
+          } else {
+            peer.connectToServer(joinCode);
+          }
+        }, 3000);
+      } else {
+        setTimeout(() => showSnackbar("Verbindung zum Gerät verloren.", "warning"), 0);
+      }
+    }
+  }, [peer.connected, isClientRole, joinCode, isReconnecting, peer, showSnackbar]);
+
+  useEffect(() => {
+    if (peer.error) {
+      setTimeout(() => showSnackbar(`Fehler: ${peer.error}`, "error"), 0);
+    }
+  }, [peer.error, showSnackbar]);
 
   const handleVolumeChange = (type: 'master' | 'engine' | 'spotify', newValue: number) => {
     if (type === 'master') { setMasterVol(newValue); if (peer.connected) peer.broadcastState({ masterVol: newValue }); }
@@ -387,19 +461,23 @@ export default function App() {
     </Box>
   );
 
+  const showSensorButtons = mode === 'solo' || mode === 'gps' || (mode === 'sensor' && isClientRole);
+
   const sensorControlsUI = (
     <Stack direction="column" spacing={2} sx={{ width: '100%', alignItems: 'center' }}>
       {mode === 'sensor' && <Typography color="success.main" sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}><FaLink /> Erfolgreich verbunden</Typography>}
 
-      {!sensor.hasPermission ? (
-        <Button variant="contained" color="primary" size="large" fullWidth onClick={sensor.requestAccess}>Sensoren für G-Kräfte aktivieren</Button>
-      ) : (
-        <Stack direction="row" spacing={2} sx={{ width: '100%' }}>
-          <Button fullWidth variant="outlined" color="inherit" onClick={handleCalibrate} startIcon={<FaArrowsToEye />}>Kalibrieren</Button>
-          <Button fullWidth variant={sensor.isPaused ? "contained" : "outlined"} color={sensor.isPaused ? "primary" : "inherit"} onClick={sensor.togglePause} startIcon={sensor.isPaused ? <FaPlay /> : <FaPause />}>
-            {sensor.isPaused ? "Fortsetzen" : "Pausieren"}
-          </Button>
-        </Stack>
+      {showSensorButtons && (
+        !sensor.hasPermission ? (
+          <Button variant="contained" color="primary" size="large" fullWidth onClick={sensor.requestAccess}>Sensoren für G-Kräfte aktivieren</Button>
+        ) : (
+          <Stack direction="row" spacing={2} sx={{ width: '100%' }}>
+            <Button fullWidth variant="outlined" color="inherit" onClick={handleCalibrate} startIcon={<FaArrowsToEye />}>Kalibrieren</Button>
+            <Button fullWidth variant={sensor.isPaused ? "contained" : "outlined"} color={sensor.isPaused ? "primary" : "inherit"} onClick={sensor.togglePause} startIcon={sensor.isPaused ? <FaPlay /> : <FaPause />}>
+              {sensor.isPaused ? "Fortsetzen" : "Pausieren"}
+            </Button>
+          </Stack>
+        )
       )}
     </Stack>
   );
@@ -644,6 +722,29 @@ export default function App() {
             driverSide={driverSide} setDriverSide={setDriverSide}
             isClientRole={isClientRole}
           />
+
+          <Snackbar
+            open={snackbar.open}
+            autoHideDuration={isReconnecting ? undefined : 4000}
+            onClose={handleCloseSnackbar}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+          >
+            <Alert
+              onClose={isReconnecting ? undefined : handleCloseSnackbar}
+              severity={snackbar.severity}
+              sx={{ width: '100%', alignItems: 'center' }}
+              action={
+                isReconnecting && (
+                  <Button color="inherit" size="small" onClick={cancelReconnection}>
+                    ABBRECHEN
+                  </Button>
+                )
+              }
+            >
+              {snackbar.msg}
+            </Alert>
+          </Snackbar>
+
         </Box>
       )}
     </ThemeProvider>
