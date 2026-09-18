@@ -210,8 +210,23 @@ export function SpotifyPanel({ volume, isClientRole }: SpotifyPanelProps) {
 
             spotifyPlayer.addListener('player_state_changed', (state: SpotifyState | null) => {
                 if (!state) return;
-                setCurrentTrack(state.track_window.current_track);
+
+                const track = state.track_window.current_track;
+                setCurrentTrack(track);
                 setPaused(state.paused);
+
+                if ('mediaSession' in navigator && track) {
+                    navigator.mediaSession.metadata = new MediaMetadata({
+                        title: track.name,
+                        artist: track.artists?.map(a => a.name).join(', ') || 'Unbekannter Künstler',
+                        album: 'Spotify',
+                        artwork: track.album?.images?.map(img => ({
+                            src: img.url,
+                            sizes: '512x512',
+                            type: 'image/jpeg'
+                        })) || []
+                    });
+                }
             });
 
             spotifyPlayer.connect();
@@ -235,6 +250,35 @@ export function SpotifyPanel({ volume, isClientRole }: SpotifyPanelProps) {
             playerRef.current.setVolume(isClientRole ? 0 : volume).catch(console.error);
         }
     }, [volume, isClientRole, isPlayerReady]);
+
+    useEffect(() => {
+        if ('mediaSession' in navigator) {
+            navigator.mediaSession.setActionHandler('play', () => {
+                playerRef.current?.togglePlay();
+            });
+
+            navigator.mediaSession.setActionHandler('pause', () => {
+                playerRef.current?.togglePlay();
+            });
+
+            navigator.mediaSession.setActionHandler('previoustrack', () => {
+                playerRef.current?.previousTrack();
+            });
+
+            navigator.mediaSession.setActionHandler('nexttrack', () => {
+                playerRef.current?.nextTrack();
+            });
+        }
+
+        return () => {
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.setActionHandler('play', null);
+                navigator.mediaSession.setActionHandler('pause', null);
+                navigator.mediaSession.setActionHandler('previoustrack', null);
+                navigator.mediaSession.setActionHandler('nexttrack', null);
+            }
+        };
+    }, []);
 
     const handleSaveClientId = () => {
         if (inputClientId.trim()) {
