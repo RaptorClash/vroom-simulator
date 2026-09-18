@@ -10,6 +10,7 @@ import { usePeer } from './hooks/usePeer';
 import { Dashboard } from './components/Dashboard';
 import { Controls } from './components/Controls';
 import { SettingsDrawer } from './components/SettingsDrawer';
+import { KeepAwake } from '@capacitor-community/keep-awake';
 
 const darkTheme = createTheme({
   palette: { mode: 'dark', background: { default: '#121212', paper: '#1e1e1e' }, primary: { main: '#f43f5e' } },
@@ -39,7 +40,7 @@ export default function App() {
   const [syncedSpeed, setSyncedSpeed] = useState<number | null>(null);
   const [syncedRpm, setSyncedRpm] = useState<number | null>(null);
   const [syncedRpmRatio, setSyncedRpmRatio] = useState<number | null>(null);
-
+  const [pocketMode, setPocketMode] = useState(false);
   const [currentGear, setCurrentGear] = useState(1);
   const [isAutoShift, setIsAutoShift] = useState(true);
 
@@ -242,6 +243,16 @@ export default function App() {
       }, 0);
     }
   }, [absSpeed, currentGear, gears, speedPerGear, isAutoShift, engineStarted, peer]);
+
+  useEffect(() => {
+    if (mode === 'sensor' && isClientRole && peer.connected) {
+      KeepAwake.keepAwake();
+    } else {
+      KeepAwake.allowSleep();
+    }
+
+    return () => { KeepAwake.allowSleep(); };
+  }, [mode, isClientRole, peer.connected]);
 
   const shiftUp = () => {
     setIsAutoShift(false);
@@ -475,6 +486,9 @@ export default function App() {
             <Button fullWidth variant="outlined" color="inherit" onClick={handleCalibrate} startIcon={<FaArrowsToEye />}>Kalibrieren</Button>
             <Button fullWidth variant={sensor.isPaused ? "contained" : "outlined"} color={sensor.isPaused ? "primary" : "inherit"} onClick={sensor.togglePause} startIcon={sensor.isPaused ? <FaPlay /> : <FaPause />}>
               {sensor.isPaused ? "Fortsetzen" : "Pausieren"}
+            </Button>
+            <Button fullWidth variant="outlined" color="inherit" onClick={() => setPocketMode(true)}>
+              Pocket Mode (Bildschirm schwarz)
             </Button>
           </Stack>
         )
@@ -745,6 +759,17 @@ export default function App() {
             </Alert>
           </Snackbar>
 
+        </Box>
+      )}
+      {pocketMode && (
+        <Box
+          onClick={() => setPocketMode(false)}
+          sx={{
+            position: 'fixed', inset: 0, bgcolor: 'black', zIndex: 9999,
+            display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }}
+        >
+          <Typography variant="body2" sx={{ color: '#333' }}>Tap to wake</Typography>
         </Box>
       )}
     </ThemeProvider>

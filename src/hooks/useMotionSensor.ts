@@ -6,7 +6,7 @@ export function useMotionSensor() {
     const [load, setLoad] = useState(0);
 
     const baselineRef = useRef<number | null>(null);
-    
+
     const tiltLoadRef = useRef(0);
     const accelLoadRef = useRef(0);
 
@@ -19,14 +19,14 @@ export function useMotionSensor() {
             try {
                 const permission = await DeviceOrientation.requestPermission();
                 if (permission === 'granted') {
-                    
+
                     const DeviceMotion = window.DeviceMotionEvent as unknown as {
                         requestPermission?: () => Promise<'granted' | 'denied' | 'default'>;
                     };
                     if (typeof DeviceMotion.requestPermission === 'function') {
                         await DeviceMotion.requestPermission();
                     }
-                    
+
                     setHasPermission(true);
                 } else {
                     alert('Sensor-Zugriff verweigert.');
@@ -81,23 +81,22 @@ export function useMotionSensor() {
         };
 
         const handleMotion = (event: DeviceMotionEvent) => {
-            const accelX = event.acceleration?.x || 0;
             const accelY = event.acceleration?.y || 0;
             const accelZ = event.acceleration?.z || 0;
 
-            const rawAccel = Math.sqrt(accelX * accelX + accelY * accelY + accelZ * accelZ);
-            
-            const effectiveAccel = rawAccel > 0.5 ? rawAccel : 0;
-            
-            const targetAccelLoad = Math.min(1.0, effectiveAccel / 4.0);
-            
-            accelLoadRef.current += (targetAccelLoad - accelLoadRef.current) * 0.15;
+            const forwardAccel = Math.sqrt(accelY * accelY + accelZ * accelZ);
+
+            const effectiveAccel = forwardAccel > 0.5 ? forwardAccel : 0;
+
+            const targetAccelLoad = Math.min(1.0, effectiveAccel / 3.0);
+
+            accelLoadRef.current += (targetAccelLoad - accelLoadRef.current) * 0.4;
             updateCombinedLoad();
         };
 
         const updateCombinedLoad = () => {
             let finalLoad = tiltLoadRef.current;
-            
+
             if (accelLoadRef.current > Math.abs(tiltLoadRef.current)) {
                 finalLoad = accelLoadRef.current;
             }
